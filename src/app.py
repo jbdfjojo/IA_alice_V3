@@ -1,6 +1,7 @@
 import sys
 from PyQt5.QtWidgets import QApplication
 from gui.main_window import MainWindow
+from gui.styles import apply_dark_theme
 
 if __name__ == "__main__":
     model_paths = {
@@ -9,6 +10,7 @@ if __name__ == "__main__":
     }
 
     app = QApplication(sys.argv)
+    apply_dark_theme(app)
     window = MainWindow(model_paths)
     window.show()
     sys.exit(app.exec_())

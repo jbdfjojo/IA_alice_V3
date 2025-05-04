@@ -1,10 +1,12 @@
 import os
+import pyttsx3
 from llama_cpp import Llama
 
 class LlamaCppAgent:
     def __init__(self, model_path):
         self.model_path = model_path
         self.model = None
+        self.engine = pyttsx3.init()
         self.load_model()
 
     def load_model(self):
@@ -12,6 +14,10 @@ class LlamaCppAgent:
             raise FileNotFoundError(f"Le modèle n'a pas été trouvé à l'emplacement : {self.model_path}")
         self.model = Llama(model_path=self.model_path)
         print(f"[AGENT] Modèle chargé depuis {self.model_path}")
+
+    def speak(self, text):
+        self.engine.say(text)
+        self.engine.runAndWait()
 
     def generate_response(self, prompt):
             print(f"[AGENT] Génération de réponse pour le prompt: {prompt}")
@@ -27,6 +33,7 @@ class LlamaCppAgent:
                     top_p=0.95,
                     stop=["</s>", "Alice:", "Vous:"]
                 )
+                self.speak(response['choices'][0]['text'].strip())
 
                 return response['choices'][0]['text'].strip()
 

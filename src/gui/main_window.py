@@ -3,7 +3,8 @@ from PyQt5.QtWidgets import (
     QPushButton, QComboBox, QApplication
 )
 from PyQt5.QtCore import QThread, pyqtSignal
-
+from PyQt5.QtWidgets import QLabel
+from PyQt5.QtGui import QPixmap
 from llama_cpp_agent import LlamaCppAgent
 
 
@@ -14,6 +15,10 @@ class LlamaThread(QThread):
         super().__init__()
         self.model = model
         self.prompt = prompt
+        layout = QVBoxLayout()
+        logo = QLabel()
+        logo.setPixmap(QPixmap("assets/logo.png").scaledToHeight(80))
+        layout.addWidget(logo)
 
     def run(self):
         try:
