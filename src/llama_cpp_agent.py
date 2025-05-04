@@ -56,13 +56,25 @@ class LlamaCppAgent:
     def generate(self, prompt):
         print(f"[AGENT] Génération de réponse pour le prompt: {prompt}")
         try:
-            if "bonjour" in prompt.lower() or "salut" in prompt.lower():
-                return "Bonjour ! Comment puis-je vous aider ?"
+            # Vérifie si l'utilisateur force l'enregistrement
+            force_save = "#save" in prompt
+            cleaned_prompt = prompt.replace("#save", "").strip()
+
+            # Préparer le contexte mémoire (optionnel)
+            self.cursor = self.db_manager.conn.cursor()
+            self.cursor.execute("SELECT prompt, response FROM memory ORDER BY id DESC LIMIT 5")
+            memory = self.cursor.fetchall()
+
+            memory_context = ""
+            for old_prompt, old_response in reversed(memory):
+                memory_context += f"Vous : {old_prompt}\nAlice : {old_response}\n"
 
             full_prompt = (
                 "Tu es une IA qui répond uniquement aux questions posées en français. "
-                "Ne réponds pas par des monologues ou des réponses non demandées.\n\n"
-                f"{prompt}"
+                "Utilise les informations précédentes si elles sont utiles à la réponse. "
+                "Ne réponds que si tu es certain.\n\n"
+                f"{memory_context}\n"
+                f"Vous : {cleaned_prompt}\nAlice :"
             )
 
             response = self.model.create_completion(
@@ -75,8 +87,9 @@ class LlamaCppAgent:
 
             answer = response['choices'][0]['text'].strip()
 
-            if self.is_important(prompt, answer):
-                self.db_manager.save_memory(prompt, answer)
+            # Enregistrement en mémoire selon mot-clé ou importance
+            if force_save or self.is_important(cleaned_prompt, answer):
+                self.db_manager.save_memory(cleaned_prompt, answer)
 
             self.speak(answer)
             return answer
