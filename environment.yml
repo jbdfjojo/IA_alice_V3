@@ -1,0 +1,18 @@
+name: ia_camembert
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - torch==2.5.1
+  - pytorch
+  - torchvision
+  - torchaudio
+  - protobuf==3.20
+  - PyQt5==5.15.9
+  - torch==2.5.1
+  - transformers==4.28.1
+  - pip:
+      - sentencepiece

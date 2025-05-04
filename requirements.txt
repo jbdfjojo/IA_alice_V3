@@ -1,0 +1,5 @@
+flask==2.2.2
+llama-cpp-python>=0.2.11
+PyQt5>=5.15.9
+transformers>=4.38.0
+torch>=2.1.0
