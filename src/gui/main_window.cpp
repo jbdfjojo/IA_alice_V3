@@ -1,5 +1,9 @@
+import sys
+import os
+import mysql.connector
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, QComboBox
 from PyQt5.QtCore import QThread, pyqtSignal
+from gui.memory_window import MemoryWindow
 
 from llama_cpp_agent import LlamaCppAgent  # uniquement cette ligne est nécessaire
 
@@ -14,8 +18,30 @@ class LlamaThread(QThread):
     def run(self):
         print(f"[THREAD] Exécution du thread avec le prompt : {self.prompt}")
         try:
-            response = self.agent.generate_response(self.prompt)
-            print(f"[THREAD] Réponse générée : {response}")
+            # Connexion MySQL (ajustez les infos selon votre config)
+            conn = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="",  # mettez le mot de passe si nécessaire
+                database="alice_db"
+            )
+            cursor = conn.cursor()
+
+            # Vérifier si le prompt est déjà connu
+            cursor.execute("SELECT response FROM memory WHERE prompt = %s", (self.prompt,))
+            row = cursor.fetchone()
+
+            if row:
+                print("[THREAD] Réponse récupérée de la base de données")
+                response = row[0]
+            else:
+                response = self.agent.generate_response(self.prompt)
+                print(f"[THREAD] Réponse générée : {response}")
+                cursor.execute("INSERT INTO memory (prompt, response) VALUES (%s, %s)", (self.prompt, response))
+                conn.commit()
+
+            cursor.close()
+            conn.close()
             self.finished.emit(response)
         except Exception as e:
             self.finished.emit(f"[Erreur] {str(e)}")

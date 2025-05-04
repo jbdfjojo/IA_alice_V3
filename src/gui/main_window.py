@@ -1,34 +1,30 @@
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QTextEdit,
-    QPushButton, QComboBox, QApplication
-)
-from PyQt5.QtCore import QThread, pyqtSignal
-from PyQt5.QtWidgets import QLabel
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QTextEdit, QPushButton, QComboBox
 from PyQt5.QtGui import QPixmap
+from PyQt5.QtCore import QThread, pyqtSignal
+from gui.memory_window import MemoryWindow
 from llama_cpp_agent import LlamaCppAgent
+from gui.memory_window import MemoryWindow
+from db.mysql_manager import MySQLManager  # ← import du gestionnaire MySQL
 
 
-class LlamaThread(QThread):
+class MySQLThread(QThread):
     response_ready = pyqtSignal(str)
 
     def __init__(self, model: LlamaCppAgent, prompt: str):
         super().__init__()
         self.model = model
         self.prompt = prompt
-        layout = QVBoxLayout()
-        logo = QLabel()
-        logo.setPixmap(QPixmap("assets/logo.png").scaledToHeight(80))
-        layout.addWidget(logo)
 
     def run(self):
         try:
             response = self.model.generate_response(self.prompt)
-            if isinstance(response, dict) and 'choices' in response:
-                self.response_ready.emit(response['choices'][0]['text'].strip())
-            elif isinstance(response, str):
-                self.response_ready.emit(response.strip())
-            else:
-                self.response_ready.emit("Réponse invalide.")
+            self.response_ready.emit(response.strip())
+
+            # Enregistrer dans la mémoire (base MySQL)
+            memory_db = MySQLManager()
+            memory_db.save_memory(self.prompt, response)
+            memory_db.close()
+
         except Exception as e:
             self.response_ready.emit(f"Erreur : {str(e)}")
 
@@ -43,6 +39,15 @@ class MainWindow(QWidget):
         self.agent = None
 
         self.layout = QVBoxLayout()
+
+        logo = QLabel()
+        logo.setPixmap(QPixmap("assets/logo.png").scaledToHeight(80))
+        self.layout.addWidget(logo)
+
+        self.memory_button = QPushButton("Voir mémoire")
+        self.memory_button.clicked.connect(self.open_memory_window)
+        self.layout.addWidget(self.memory_button)
+
         self.label = QLabel("Entrez un message pour Alice :")
         self.input_box = QTextEdit()
         self.response_box = QTextEdit()
@@ -78,9 +83,26 @@ class MainWindow(QWidget):
         self.response_box.append(f"Vous : {prompt}")
         self.input_box.clear()
 
-        self.thread = LlamaThread(self.agent, prompt)
+        self.thread = MySQLThread(self.agent, prompt)
         self.thread.response_ready.connect(self.display_response)
         self.thread.start()
 
     def display_response(self, response):
         self.response_box.append(f"Alice : {response}")
+
+    def open_memory_window(self):
+        self.memory_window = MemoryWindow()
+        self.memory_window.exec_()
+
+
+if __name__ == '__main__':
+    app = QApplication([])
+
+    model_paths = {
+        "Mistral": "C:/Users/Blazufr/Desktop/IA_alice_V3/model/mistral-7b-instruct-v0.2.Q8_0.gguf",
+        "Nous-Hermes": "C:/Users/Blazufr/Desktop/IA_alice_V3/model/nous-hermes-2-mixtral-8x7b-sft.Q8_0.gguf"
+    }
+
+    window = MainWindow(model_paths)
+    window.show()
+    app.exec_()
