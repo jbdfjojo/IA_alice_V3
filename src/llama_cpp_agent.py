@@ -20,22 +20,39 @@ class LlamaCppAgent:
         self.engine.runAndWait()
 
     def generate_response(self, prompt):
-            print(f"[AGENT] Génération de réponse pour le prompt: {prompt}")
-            try:
-                # Ajout d'une instruction pour donner un ton plus amical et naturel
-                full_prompt = f"Tu es Alice, une intelligence artificielle avancée. Tu dois répondre de manière courtoise et humaine.\n\nUtilise un langage naturel, et réponds de manière cohérente à ce qui est demandé. Si quelqu'un te dit 'bonjour', réponds poliment.\n\n{prompt}"
+        print(f"[AGENT] Génération de réponse pour le prompt: {prompt}")
+        try:
+            # Si le prompt est une salutation, répondre uniquement par une salutation.
+            if "bonjour" in prompt.lower() or "salut" in prompt.lower():
+                return "Bonjour ! Comment puis-je vous aider ?"
 
-                # Génération avec la bonne méthode et bons arguments
-                response = self.model.create_completion(
-                    prompt=full_prompt,
-                    max_tokens=150,
-                    temperature=0.7,
-                    top_p=0.95,
-                    stop=["</s>", "Alice:", "Vous:"]
-                )
-                self.speak(response['choices'][0]['text'].strip())
+            # Spécification d'une réponse uniquement pour les questions posées.
+            full_prompt = f"Tu es une IA qui répond uniquement aux questions posées en français. Ne réponds pas par des monologues ou des réponses non demandées.\n\n{prompt}"
 
-                return response['choices'][0]['text'].strip()
+            # Génération de la réponse avec les bons paramètres
+            response = self.model.create_completion(
+                prompt=full_prompt,
+                max_tokens=150,
+                temperature=0.7,
+                top_p=0.95,
+                stop=["</s>", "Alice:", "Vous:"]
+            )
 
-            except Exception as e:
-                raise RuntimeError(f"[AGENT] Erreur lors de la génération : {str(e)}")
+            # Récupération de la réponse
+            answer = response['choices'][0]['text'].strip()
+
+            # Lire la réponse à haute voix
+            self.speak(answer)
+
+            return answer
+
+        except Exception as e:
+            raise RuntimeError(f"[AGENT] Erreur lors de la génération : {str(e)}")
+
+
+
+
+
+
+
+
