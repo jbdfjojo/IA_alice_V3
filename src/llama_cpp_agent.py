@@ -14,17 +14,20 @@ class LlamaThread(QThread):
         self.prompt = prompt
 
     def run(self):
-        """Exécute la génération de la réponse dans un thread séparé."""
         try:
-            response = self.agent.generate(self.prompt)  # appel à generate (corrigé)
-            self.response_ready.emit(response)
+            # Assurez-vous de ne pas envoyer de prompt vide
+            if self.prompt.strip():
+                response = self.agent.generate(self.prompt)
+                self.response_ready.emit(response)
+            else:
+                self.response_ready.emit("Aucune entrée valide détectée.")
         except Exception as e:
             self.response_ready.emit(f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}")
-
 
 class LlamaCppAgent:
     def __init__(self, model_path):
         self.model_path = model_path
+        self.speech_enabled = True
         self.engine = pyttsx3.init()
         print(f"[AGENT] Chargement du modèle depuis {model_path}")
         self.model = Llama(model_path=model_path, n_ctx=2048)
@@ -34,12 +37,19 @@ class LlamaCppAgent:
             password="JOJOJOJO88",
             database="ia_alice"
         )
+        self.first_interaction = True  # Variable pour vérifier si c'est la première interaction
+
+    def set_speech_enabled(self, enabled: bool):
+        self.speech_enabled = enabled
+
+    def reset_memory(self):
+        # Méthode pour nettoyer la mémoire
+        self.db_manager.clear_memory()
+        print("[AGENT] Mémoire réinitialisée.")
 
     def is_important(self, prompt: str, response: str) -> bool:
         prompt = prompt.strip().lower()
-
         banal = ["bonjour", "salut", "yo", "ok", "d'accord", "merci", "au revoir", "oui", "non", "ça va", "super", "cool"]
-
         keywords = ["faire", "créer", "projet", "problème", "résoudre", "code", "expliquer", "fonction", "installer", "comment", "aide", "python", "qt", "mysql"]
 
         if len(prompt) < 15 or any(b in prompt for b in banal):
@@ -53,50 +63,73 @@ class LlamaCppAgent:
 
         return False
 
-    def generate(self, prompt):
+    def generate(self, prompt: str) -> str:
+        # Vérifier si le prompt est vide ou contient uniquement des espaces
+        prompt = prompt.strip()
+        if not prompt and self.first_interaction:
+            self.first_interaction = False
+            print("[AGENT] Première interaction détectée, aucune réponse générée.")
+            return "Bonjour ! Comment puis-je vous aider aujourd'hui ?"
+
+        if not prompt:
+            print("[AGENT] Aucune entrée utilisateur détectée. Aucun prompt généré.")
+            return ""  # Rien à répondre si aucun prompt n'est donné.
+
         print(f"[AGENT] Génération de réponse pour le prompt: {prompt}")
+        
+        # Ajout d'un contrôle pour éviter un monologue pour les saluts ou réponses simples
+        simple_greetings = ["bonjour", "salut", "yo", "d'accord", "merci", "au revoir"]
+        if any(greeting in prompt.lower() for greeting in simple_greetings):
+            return "Bonjour ! Comment puis-je vous aider aujourd'hui ?"
+
         try:
-            # Vérifie si l'utilisateur force l'enregistrement
             force_save = "#save" in prompt
             cleaned_prompt = prompt.replace("#save", "").strip()
 
-            # Préparer le contexte mémoire (optionnel)
-            self.cursor = self.db_manager.conn.cursor()
-            self.cursor.execute("SELECT prompt, response FROM memory ORDER BY id DESC LIMIT 5")
-            memory = self.cursor.fetchall()
+            try:
+                memory = self.db_manager.fetch_last_memories(5)
+            except Exception as db_err:
+                print(f"[ERREUR] [BDD] {db_err}")
+                memory = []
 
             memory_context = ""
             for old_prompt, old_response in reversed(memory):
                 memory_context += f"Vous : {old_prompt}\nAlice : {old_response}\n"
 
             full_prompt = (
-                "Tu es une IA qui répond uniquement aux questions posées en français. "
-                "Utilise les informations précédentes si elles sont utiles à la réponse. "
-                "Ne réponds que si tu es certain.\n\n"
+                "Tu es une IA créative qui génère des réponses adaptées aux questions posées en français. "
+                "Réponds de manière concise et pertinente, tout en utilisant des informations passées lorsque cela est utile. "
+                "Tu es libre de donner des réponses créatives selon le contexte.\n\n"
                 f"{memory_context}\n"
                 f"Vous : {cleaned_prompt}\nAlice :"
             )
 
+            # Augmenter max_tokens, temperature et top_p pour une réponse plus longue et créative
             response = self.model.create_completion(
                 prompt=full_prompt,
-                max_tokens=1500,
-                temperature=0.7,
+                max_tokens=500,  # Augmenter le nombre de tokens pour permettre une réponse détaillée
+                temperature=0.9,  # Plus créatif et varié
                 top_p=0.95,
                 stop=["</s>", "Alice:", "Vous:"]
             )
 
             answer = response['choices'][0]['text'].strip()
 
-            # Enregistrement en mémoire selon mot-clé ou importance
             if force_save or self.is_important(cleaned_prompt, answer):
                 self.db_manager.save_memory(cleaned_prompt, answer)
 
-            self.speak(answer)
+            if self.speech_enabled:
+                self.speak(answer)
+
             return answer
 
         except Exception as e:
             raise RuntimeError(f"[AGENT] Erreur lors de la génération : {str(e)}")
 
-    def speak(self, text):
-        self.engine.say(text)
-        self.engine.runAndWait()
+    def speak(self, text: str):
+        try:
+            if self.speech_enabled:
+                self.engine.say(text)
+                self.engine.runAndWait()
+        except Exception as e:
+            print(f"[ERREUR] [VOIX] {e}")

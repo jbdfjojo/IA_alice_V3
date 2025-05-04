@@ -42,6 +42,10 @@ class MySQLManager:
             print(f"[MySQL] Erreur de lecture : {e}")
             return []
 
+    def fetch_last_memories(self, limit=5):
+        """Récupère les dernières interactions pour le contexte mémoire."""
+        return self.fetch_memory(limit)
+
     def close(self):
         if self.conn and self.conn.is_connected():
             self.cursor.close()
