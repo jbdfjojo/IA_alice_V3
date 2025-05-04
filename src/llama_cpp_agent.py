@@ -50,7 +50,7 @@ class LlamaCppAgent:
     def is_important(self, prompt: str, response: str) -> bool:
         prompt = prompt.strip().lower()
         banal = ["bonjour", "salut", "yo", "ok", "d'accord", "merci", "au revoir", "oui", "non", "ça va", "super", "cool"]
-        keywords = ["faire", "créer", "projet", "problème", "résoudre", "code", "expliquer", "fonction", "installer", "comment", "aide", "python", "qt", "mysql"]
+        keywords = ["faire", "créer","creer", "projet", "problème", "résoudre", "code", "expliquer", "fonction", "installer", "comment", "aide", "python", "qt", "mysql"]
 
         if len(prompt) < 15 or any(b in prompt for b in banal):
             return False
