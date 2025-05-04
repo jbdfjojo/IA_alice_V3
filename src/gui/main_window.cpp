@@ -22,7 +22,7 @@ class LlamaThread(QThread):
             conn = mysql.connector.connect(
                 host="localhost",
                 user="root",
-                password="",  # mettez le mot de passe si nécessaire
+                password="JOJOJOJO88",  # mettez le mot de passe si nécessaire
                 database="alice_db"
             )
             cursor = conn.cursor()
