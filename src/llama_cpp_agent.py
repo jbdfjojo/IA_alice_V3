@@ -64,7 +64,7 @@ class LlamaCppAgent:
         return False
 
     def generate(self, prompt: str) -> str:
-        # Vérifier si le prompt est vide ou contient uniquement des espaces
+    # Vérifier si le prompt est vide ou contient uniquement des espaces
         prompt = prompt.strip()
         if not prompt and self.first_interaction:
             self.first_interaction = False
@@ -76,11 +76,6 @@ class LlamaCppAgent:
             return ""  # Rien à répondre si aucun prompt n'est donné.
 
         print(f"[AGENT] Génération de réponse pour le prompt: {prompt}")
-        
-        # Ajout d'un contrôle pour éviter un monologue pour les saluts ou réponses simples
-        simple_greetings = ["bonjour", "salut", "yo", "d'accord", "merci", "au revoir"]
-        if any(greeting in prompt.lower() for greeting in simple_greetings):
-            return "Bonjour ! Comment puis-je vous aider aujourd'hui ?"
 
         try:
             force_save = "#save" in prompt
@@ -94,7 +89,8 @@ class LlamaCppAgent:
 
             memory_context = ""
             for old_prompt, old_response in reversed(memory):
-                memory_context += f"Vous : {old_prompt}\nAlice : {old_response}\n"
+                # Inverser l'ordre : d'abord la réponse d'Alice, puis la question de l'utilisateur
+                memory_context += f"Alice : {old_response}\nVous : {old_prompt}\n"
 
             full_prompt = (
                 "Tu es une IA créative qui génère des réponses adaptées aux questions posées en français. "

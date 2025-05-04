@@ -61,14 +61,15 @@ class MainWindow(QWidget):
 
         self.explanation_label = QLabel("Tapez '#save' pour enregistrer la donnée dans la mémoire.")
 
+        # Réorganiser l'ordre des widgets pour mettre la réponse en haut
+        self.layout.addWidget(self.response_box)  # Ajouter la réponse en premier
+        self.layout.addWidget(QLabel("Réponse :"))
         self.layout.addWidget(self.model_selector)
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.input_box)
         self.layout.addWidget(self.send_button)
         self.layout.addWidget(self.save_button)
         self.layout.addWidget(self.explanation_label)
-        self.layout.addWidget(QLabel("Réponse :"))
-        self.layout.addWidget(self.response_box)
 
         self.setLayout(self.layout)
 
@@ -96,6 +97,7 @@ class MainWindow(QWidget):
             self.agent.set_speech_enabled(self.voice_checkbox.isChecked())
         self.settings.setValue("voice_enabled", self.voice_checkbox.isChecked())
 
+    # Méthode pour envoyer un prompt à l'agent et attendre la réponse
     def send_prompt(self):
         """Envoie un prompt à l'agent et attend la réponse."""
         prompt = self.input_box.toPlainText().strip()
@@ -103,11 +105,10 @@ class MainWindow(QWidget):
             return
 
         self.input_box.clear()  # Nettoyer l'entrée avant d'envoyer
-        self.response_box.append(f"Vous : {prompt}")
         self.send_button.setEnabled(False)
 
         if self.agent:
-            # On applique l'état de la voix avant d'envoyer la demande
+            # Appliquer l'état de la voix avant d'envoyer la demande
             self.agent.set_speech_enabled(self.voice_checkbox.isChecked())
 
         # Créer un thread pour gérer la réponse de l'agent
@@ -115,12 +116,16 @@ class MainWindow(QWidget):
         self.thread.response_ready.connect(self.display_response)
         self.thread.start()
 
+    # Méthode pour afficher la réponse de l'agent
     def display_response(self, response):
         """Affiche la réponse de l'agent."""
         if response.startswith("[ERREUR]"):
             self.response_box.append(response)
         else:
+            # Inverser l'ordre d'affichage : d'abord la réponse d'Alice, puis la question de l'utilisateur
+            self.response_box.clear()  # Clear the response box before adding new content
             self.response_box.append(f"Alice : {response}")
+            self.response_box.append(f"Vous : {self.input_box.toPlainText().strip()}")
         self.send_button.setEnabled(True)
 
     def open_memory_window(self):
