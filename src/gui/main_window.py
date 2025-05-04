@@ -13,8 +13,9 @@ class LlamaThread(QThread):
 
     def run(self):
         try:
-            # Tentative de génération de la réponse
-            response = self.agent.generate(self.prompt)
+            # Modification ici : ajout d'un prompt clair pour le modèle
+            prompt_with_instruction = f"Réponds uniquement à la question suivante : {self.prompt}"
+            response = self.agent.generate(prompt_with_instruction)
             self.response_ready.emit(response)
         except Exception as e:
             # Gestion de l'erreur : émission d'un message d'erreur
@@ -97,12 +98,14 @@ class MainWindow(QWidget):
             self.agent.set_speech_enabled(self.voice_checkbox.isChecked())
         self.settings.setValue("voice_enabled", self.voice_checkbox.isChecked())
 
-    # Méthode pour envoyer un prompt à l'agent et attendre la réponse
     def send_prompt(self):
         """Envoie un prompt à l'agent et attend la réponse."""
         prompt = self.input_box.toPlainText().strip()
         if not prompt:
             return
+
+        # Affiche d'abord la question de l'utilisateur
+        self.response_box.append(f"\nVous : {prompt}")
 
         self.input_box.clear()  # Nettoyer l'entrée avant d'envoyer
         self.send_button.setEnabled(False)
@@ -116,16 +119,13 @@ class MainWindow(QWidget):
         self.thread.response_ready.connect(self.display_response)
         self.thread.start()
 
-    # Méthode pour afficher la réponse de l'agent
     def display_response(self, response):
         """Affiche la réponse de l'agent."""
         if response.startswith("[ERREUR]"):
             self.response_box.append(response)
         else:
-            # Inverser l'ordre d'affichage : d'abord la réponse d'Alice, puis la question de l'utilisateur
-            self.response_box.clear()  # Clear the response box before adding new content
-            self.response_box.append(f"Alice : {response}")
-            self.response_box.append(f"Vous : {self.input_box.toPlainText().strip()}")
+            # Affiche d'abord la question de l'utilisateur, puis la réponse d'Alice
+            self.response_box.append(f"Alice : {response}")  # Affiche la réponse de l'agent
         self.send_button.setEnabled(True)
 
     def open_memory_window(self):
