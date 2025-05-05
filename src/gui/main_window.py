@@ -99,25 +99,31 @@ class MainWindow(QWidget):
         self.settings.setValue("voice_enabled", self.voice_checkbox.isChecked())
 
     def send_prompt(self):
-        """Envoie un prompt à l'agent et attend la réponse."""
+        """Envoie un prompt à l'agent, affiche la réponse et sauvegarde si mot-clé détecté."""
         prompt = self.input_box.toPlainText().strip()
         if not prompt:
             return
 
-        # Affiche d'abord la question de l'utilisateur
+        # Affiche le message utilisateur
         self.response_box.append(f"\nVous : {prompt}")
-
-        self.input_box.clear()  # Nettoyer l'entrée avant d'envoyer
+        self.input_box.clear()
         self.send_button.setEnabled(False)
 
+        # Sauvegarde automatique si un mot-clé est présent
+        lower_prompt = prompt.lower()
+        keywords = ["#save", "cree", "ajoute", "souviens-toi", "enregistre"]
+        if any(keyword in lower_prompt for keyword in keywords):
+            if self.agent and hasattr(self.agent, 'db_manager'):
+                self.agent.db_manager.save_memory(prompt, "Ajout automatique via mot-clé")
+                self.response_box.append("[INFO] Mémoire enregistrée automatiquement.")
+
         if self.agent:
-            # Appliquer l'état de la voix avant d'envoyer la demande
             self.agent.set_speech_enabled(self.voice_checkbox.isChecked())
 
-        # Créer un thread pour gérer la réponse de l'agent
         self.thread = LlamaThread(self.agent, prompt)
         self.thread.response_ready.connect(self.display_response)
         self.thread.start()
+
 
     def display_response(self, response):
         """Affiche la réponse de l'agent."""
@@ -134,13 +140,18 @@ class MainWindow(QWidget):
         self.memory_window.show()
 
     def save_prompt(self):
-        """Sauvegarde la donnée dans la mémoire si #save est présent dans le prompt."""
-        prompt = self.input_box.toPlainText().strip()
-        if "#save" in prompt:
+        """Sauvegarde la donnée si un mot-clé spécifique est détecté dans le prompt."""
+        prompt = self.input_box.toPlainText().strip().lower()
+
+        # Liste de mots-clés qui déclenchent la sauvegarde
+        keywords = ["cree", "ajoute", "remplace", "souviens-toi", "enregistre", "#save"]
+
+        if any(keyword in prompt for keyword in keywords):
             self.agent.db_manager.save_memory(prompt, "Donnée sauvegardée par l'utilisateur")
             self.response_box.append("[INFO] Donnée sauvegardée avec succès.")
         else:
-            self.response_box.append("[INFO] Tapez '#save' pour enregistrer la donnée.")
+            self.response_box.append("[INFO] Aucun mot-clé détecté pour la sauvegarde.")
+
 
     def closeEvent(self, event):
         """Enregistre les paramètres avant la fermeture de l'application."""
