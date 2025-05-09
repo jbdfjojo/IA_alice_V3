@@ -2,6 +2,8 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QTextEdi
 from PyQt5.QtCore import QThread, pyqtSignal, QSettings
 from gui.memory_window import MemoryViewer
 from llama_cpp_agent import LlamaCppAgent
+from PyQt5.QtGui import QPixmap
+import os
 
 class LlamaThread(QThread):
     response_ready = pyqtSignal(str)
@@ -80,6 +82,11 @@ class MainWindow(QWidget):
         self.model_selector.setCurrentIndex(index if index != -1 else 0)
         self.load_model(self.model_selector.currentText())
 
+        #gestion des images
+        self.image_label = QLabel(self)
+        self.image_label.setVisible(False)  # Masqué par défaut
+        self.layout.addWidget(self.image_label) # Ajoute à la fenêtre
+
     def load_model(self, model_name):
         """Charge le modèle sélectionné et configure la voix."""
         try:
@@ -126,14 +133,26 @@ class MainWindow(QWidget):
   
 
     def display_response(self, response):
-        """Affiche la réponse de l'agent."""
+        """Affiche la réponse de l'agent et affiche l'image si nécessaire."""
         if response.startswith("[ERREUR]"):
             self.response_box.append(response)
         else:
-            # Affiche d'abord la question de l'utilisateur, puis la réponse d'Alice
-            self.response_box.append(f"Alice : {response}")  # Affiche la réponse de l'agent
-        self.send_button.setEnabled(True)
+            self.response_box.append(f"Alice : {response}")
 
+            # Détection de l'image dans la réponse
+            if "[IMAGE]" in response and "output.png" in response:
+                image_path = os.path.abspath("output.png")
+                if os.path.exists(image_path):
+                    pixmap = QPixmap(image_path).scaledToWidth(512)
+                    self.image_label.setPixmap(pixmap)
+                    self.image_label.setVisible(True)
+                else:
+                    self.response_box.append("[INFO] Image demandée mais introuvable.")
+            else:
+                self.image_label.clear()
+                self.image_label.setVisible(False)
+
+        self.send_button.setEnabled(True)
     def open_memory_window(self):
         """Ouvre la fenêtre de mémoire."""
         self.memory_window = MemoryViewer()

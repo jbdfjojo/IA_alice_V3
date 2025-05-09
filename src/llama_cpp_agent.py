@@ -3,7 +3,10 @@ import pyttsx3
 from llama_cpp import Llama
 from db.mysql_manager import MySQLManager
 import re
+import subprocess
 from PyQt5.QtCore import QThread, pyqtSignal
+from agent.generate import generate_image
+
 
 class LlamaThread(QThread):
     response_ready = pyqtSignal(str)
@@ -64,7 +67,6 @@ class LlamaCppAgent:
         return False
 
     def generate(self, prompt: str) -> str:
-    # Vérifier si le prompt est vide ou contient uniquement des espaces
         prompt = prompt.strip()
         if not prompt and self.first_interaction:
             self.first_interaction = False
@@ -73,7 +75,16 @@ class LlamaCppAgent:
 
         if not prompt:
             print("[AGENT] Aucune entrée utilisateur détectée. Aucun prompt généré.")
-            return ""  # Rien à répondre si aucun prompt n'est donné.
+            return ""
+
+        # ----- GÉNÉRATION D'IMAGE SI MOT-CLÉ "image" -----
+        if "image" in prompt.lower():
+            try:
+                image_path = generate_image(prompt)
+                return f"[IMAGE] Image générée avec succès : {image_path}"
+            except Exception as img_err:
+                return f"[ERREUR] Échec de la génération d'image : {img_err}"
+
 
         print(f"[AGENT] Génération de réponse pour le prompt: {prompt}")
 
@@ -89,7 +100,6 @@ class LlamaCppAgent:
 
             memory_context = ""
             for old_prompt, old_response in reversed(memory):
-                # Inverser l'ordre : d'abord la réponse d'Alice, puis la question de l'utilisateur
                 memory_context += f"Alice : {old_response}\nVous : {old_prompt}\n"
 
             full_prompt = (
@@ -100,11 +110,10 @@ class LlamaCppAgent:
                 f"Vous : {cleaned_prompt}\nAlice :"
             )
 
-            # Augmenter max_tokens, temperature et top_p pour une réponse plus longue et créative
             response = self.model.create_completion(
                 prompt=full_prompt,
-                max_tokens=500,  # Augmenter le nombre de tokens pour permettre une réponse détaillée
-                temperature=0.9,  # Plus créatif et varié
+                max_tokens=500,
+                temperature=0.9,
                 top_p=0.95,
                 stop=["</s>", "Alice:", "Vous:"]
             )
@@ -121,7 +130,6 @@ class LlamaCppAgent:
 
         except Exception as e:
             raise RuntimeError(f"[AGENT] Erreur lors de la génération : {str(e)}")
-
     def speak(self, text: str):
         try:
             if self.speech_enabled:
@@ -129,3 +137,36 @@ class LlamaCppAgent:
                 self.engine.runAndWait()
         except Exception as e:
             print(f"[ERREUR] [VOIX] {e}")
+
+    def generate_image(self, prompt: str) -> str:
+        try:
+            # Extrait juste la description après le mot-clé "image"
+            description = prompt.lower().split("image", 1)[-1].strip()
+            if not description:
+                return "[ERREUR] Veuillez décrire l'image à générer après le mot-clé 'image'."
+
+            output_path = "images/generated_image.png"
+            model_path = "C:/Users/Blazufr/Desktop/IA_alice_V3/src/agent/stable-diffusion-v1-5"
+
+            # Lancement du script de génération d'image
+            result = subprocess.run(
+                [
+                    "python",
+                    os.path.join(model_path, "generate.py"),  # Remplace par ton script réel si différent
+                    "--prompt", description,
+                    "--output", output_path
+                ],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                print(f"[ERREUR] Génération image : {result.stderr}")
+                return "[ERREUR] Échec lors de la génération de l'image."
+
+            print(f"[AGENT] Image générée avec succès : {output_path}")
+            return f"#image {output_path}"
+
+        except Exception as e:
+            return f"[ERREUR] Exception lors de la génération de l'image : {str(e)}"
+
