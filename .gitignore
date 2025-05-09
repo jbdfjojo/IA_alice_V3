@@ -22,3 +22,4 @@ Thumbs.db
 # Fichiers générés
 *.sqlite3
 *.db
+src/agent/stable-diffusion-v1-5/
