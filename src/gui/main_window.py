@@ -123,7 +123,7 @@ class MainWindow(QWidget):
         self.thread = LlamaThread(self.agent, prompt)
         self.thread.response_ready.connect(self.display_response)
         self.thread.start()
-
+  
 
     def display_response(self, response):
         """Affiche la réponse de l'agent."""
