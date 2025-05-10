@@ -43,11 +43,29 @@ class MySQLManager:
             return []
 
     def fetch_last_memories(self, limit=5):
-        """Récupère les dernières interactions pour le contexte mémoire."""
-        return self.fetch_memory(limit)
+        """Récupère les dernières interactions (ID, prompt, réponse)."""
+        try:
+            query = "SELECT id, prompt, response FROM memoire ORDER BY id DESC LIMIT %s"
+            self.cursor.execute(query, (limit,))
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(f"[ERREUR] Récupération mémoire : {e}")
+            return []
+
 
     def close(self):
         if self.conn and self.conn.is_connected():
             self.cursor.close()
             self.conn.close()
             print("[MySQL] Connexion fermée.")
+
+    def delete_memory_by_id(self, memory_id: int):
+        """Supprime une entrée mémoire spécifique par son ID."""
+        try:
+            query = "DELETE FROM memoire WHERE id = %s"
+            self.cursor.execute(query, (memory_id,))
+            self.conn.commit()
+            print(f"[BDD] Mémoire ID {memory_id} supprimée.")
+        except Exception as e:
+            print(f"[ERREUR] Suppression mémoire ID {memory_id} : {e}")
+

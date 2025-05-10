@@ -1,63 +1,90 @@
-# src/gui/memory_window.py
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QPushButton, QScrollArea,
+    QHBoxLayout, QMessageBox, QFrame
+)
+from PyQt5.QtCore import Qt
+from db.mysql_manager import MySQLManager
 
-import mysql.connector
-from mysql.connector import Error
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QTextEdit, QPushButton
 
 class MemoryViewer(QWidget):
     def __init__(self):
         super().__init__()
-
         self.setWindowTitle("Mémoire d'Alice")
-        self.resize(600, 400)
+        self.setGeometry(150, 150, 700, 500)
 
-        # Connexion à MySQL
+        self.db_manager = MySQLManager(
+            host="localhost",
+            user="root",
+            password="JOJOJOJO88",
+            database="ia_alice"
+        )
+
+        self.layout = QVBoxLayout(self)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+
+        self.container = QWidget()
+        self.container_layout = QVBoxLayout()
+        self.container.setLayout(self.container_layout)
+
+        self.scroll_area.setWidget(self.container)
+        self.layout.addWidget(self.scroll_area)
+
+        self.refresh_memory()
+
+    def refresh_memory(self):
+        # Nettoyage de l'affichage actuel
+        for i in reversed(range(self.container_layout.count())):
+            item = self.container_layout.itemAt(i).widget()
+            if item:
+                item.setParent(None)
+
         try:
-            self.conn = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="JOJOJOJO88",
-                database="ia_alice"
-            )
-            self.cursor = self.conn.cursor()
-            print("[MySQL] Connexion réussie.")
-        except Error as e:
-            print(f"[MySQL] Erreur de connexion : {e}")
+            memories = self.db_manager.fetch_all_memories()
+            if not memories:
+                label = QLabel("Aucune mémoire enregistrée.")
+                label.setStyleSheet("color: gray;")
+                self.container_layout.addWidget(label)
+                return
 
-        # Interface graphique
-        self.layout = QVBoxLayout()
+            for memory_id, prompt, response in memories:
+                frame = QFrame()
+                frame.setStyleSheet("background-color: #2d2d2d; border: 1px solid #444444; border-radius: 5px;")
+                frame_layout = QVBoxLayout(frame)
 
-        self.memory_display = QTextEdit()
-        self.memory_display.setReadOnly(True)
-        self.layout.addWidget(QLabel("Mémoire d'Alice :"))
-        self.layout.addWidget(self.memory_display)
+                prompt_label = QLabel(f"<b>Vous :</b> {prompt}")
+                prompt_label.setWordWrap(True)
+                prompt_label.setStyleSheet("color: #80d4ff;")
 
-        self.button_close = QPushButton("Fermer")
-        self.button_close.clicked.connect(self.close)
-        self.layout.addWidget(self.button_close)
+                response_label = QLabel(f"<b>Alice :</b> {response}")
+                response_label.setWordWrap(True)
+                response_label.setStyleSheet("color: #c8ffc8;")
 
-        self.setLayout(self.layout)
+                delete_button = QPushButton("Supprimer")
+                delete_button.setStyleSheet("background-color: #aa0000; color: white;")
+                delete_button.clicked.connect(lambda _, mem_id=memory_id: self.delete_memory(mem_id))
 
-        # Charger la mémoire
-        self.load_memory()
+                frame_layout.addWidget(prompt_label)
+                frame_layout.addWidget(response_label)
+                frame_layout.addWidget(delete_button)
 
-    def load_memory(self):
-        try:
-            self.cursor.execute("SELECT prompt, response FROM memory")
-            records = self.cursor.fetchall()
+                self.container_layout.addWidget(frame)
 
-            if records:
-                for prompt, response in records:
-                    self.memory_display.append(f"Vous : {prompt}\nAlice : {response}\n\n")
-            else:
-                self.memory_display.append("Aucune mémoire enregistrée.")
+        except Exception as e:
+            error_label = QLabel(f"[ERREUR] Impossible de charger les mémoires : {e}")
+            error_label.setStyleSheet("color: red;")
+            self.container_layout.addWidget(error_label)
 
-        except Error as e:
-            print(f"[MySQL] Erreur de lecture de la mémoire : {e}")
-        
-    def close(self):
-        if self.conn.is_connected():
-            self.cursor.close()
-            self.conn.close()
-            print("[MySQL] Connexion fermée.")
-        super().close()
+    def delete_memory(self, memory_id):
+        confirm = QMessageBox.question(
+            self, "Supprimer la mémoire",
+            "Voulez-vous vraiment supprimer cette mémoire ?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm == QMessageBox.Yes:
+            try:
+                self.db_manager.delete_memory_by_id(memory_id)
+                self.refresh_memory()
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec de la suppression : {e}")

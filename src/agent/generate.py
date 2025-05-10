@@ -1,29 +1,23 @@
+# src/agent/generate.py
+import argparse
 import os
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-import torch
 from diffusers import StableDiffusionPipeline
 
-# Chemin du modèle
-MODEL_PATH = "C:/Users/Blazufr/Desktop/IA_alice_V3/src/agent/stable-diffusion-v1-5"
+def generate_image(prompt: str, output_path: str = "images/generated_image.png"):
+    model_path = "C:/Users/Blazufr/Desktop/IA_alice_V3/src/agent/stable-diffusion-v1-5"
+    pipe = StableDiffusionPipeline.from_pretrained(model_path, safety_checker=None)
+    pipe.to("cpu")
 
-# Détection de l'accélérateur
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Charger sans float16 si on est sur CPU
-if device == "cuda":
-    pipe = StableDiffusionPipeline.from_pretrained(MODEL_PATH, torch_dtype=torch.float16)
-else:
-    pipe = StableDiffusionPipeline.from_pretrained(MODEL_PATH)
-
-pipe = pipe.to(device)
-
-def generate_image(prompt: str, output_path: str = "images/output.png"):
-    print(f"[IMAGE] Génération pour : {prompt}")
     image = pipe(prompt).images[0]
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     image.save(output_path)
-    print(f"[IMAGE] Image enregistrée à : {output_path}")
-    return output_path
-
+    print(f"[GENERATION] Image sauvegardée : {output_path}")
 
 if __name__ == "__main__":
-    generate_image("chat cybernétique dans une ville futuriste", "test_image.png")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prompt", type=str, required=True)
+    parser.add_argument("--output", type=str, default="images/generated_image.png")
+    args = parser.parse_args()
+
+    generate_image(args.prompt, args.output)
