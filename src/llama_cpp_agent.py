@@ -1,4 +1,3 @@
-# src/agent/llama_cpp_agent.py
 import os
 import pyttsx3
 from llama_cpp import Llama
@@ -8,7 +7,7 @@ import subprocess
 from PyQt5.QtCore import QThread, pyqtSignal
 
 class LlamaThread(QThread):
-    response_ready = pyqtSignal(str)
+    response_ready = pyqtSignal(str, str)  # Signal avec deux arguments
 
     def __init__(self, agent, prompt):
         super().__init__()
@@ -19,11 +18,12 @@ class LlamaThread(QThread):
         try:
             if self.prompt.strip():
                 response = self.agent.generate(self.prompt)
-                self.response_ready.emit(response)
+                # Émettre le signal avec deux arguments : prompt et response
+                self.response_ready.emit(self.prompt, response)  # Passe aussi le prompt et la réponse
             else:
-                self.response_ready.emit("Aucune entrée valide détectée.")
+                self.response_ready.emit(self.prompt, "Aucune entrée valide détectée.")
         except Exception as e:
-            self.response_ready.emit(f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}")
+            self.response_ready.emit(self.prompt, f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}")
 
 class LlamaCppAgent:
     def __init__(self, model_paths: dict):
@@ -47,24 +47,17 @@ class LlamaCppAgent:
     def generate(self, prompt: str) -> str:
         prompt = prompt.strip()
 
-        if "image" in prompt.lower():
-            return self.generate_image(prompt)
+        # Vérifier si le prompt contient "#save" et l'enlever de la chaîne de texte
+        if "#save" in prompt:
+            cleaned_prompt = prompt.replace("#save", "").strip()
+            self.save_to_memory(cleaned_prompt, "Réponse sauvegardée sans génération.")  # Sauvegarder uniquement
+            return "L'interaction a été sauvegardée."
 
-        cleaned_prompt = prompt.replace("#save", "").strip()
-        force_save = "#save" in prompt
-        memory = self.db_manager.fetch_last_memories(5)
-
-        memory_context = ""
-        for old_prompt, old_response in reversed(memory):
-            memory_context += f"Alice : {old_response}\nVous : {old_prompt}\n"
-
-        full_prompt = (
-            "Tu es une IA créative qui génère des réponses adaptées aux questions posées en français.\n\n"
-            f"{memory_context}\nVous : {cleaned_prompt}\nAlice :"
-        )
+        # Continuer la génération de réponse comme d'habitude
+        cleaned_prompt = prompt  # Pas de changement, car #save a été géré précédemment
 
         response = self.model.create_completion(
-            prompt=full_prompt,
+            prompt=f"Vous : {cleaned_prompt}\nAlice :",
             max_tokens=500,
             temperature=0.9,
             top_p=0.95,
@@ -72,11 +65,8 @@ class LlamaCppAgent:
         )
         answer = response['choices'][0]['text'].strip()
 
-        if force_save or self.is_important(cleaned_prompt, answer):
-            self.db_manager.save_memory(cleaned_prompt, answer)
-
-        if self.speech_enabled:
-            self.speak(answer)
+        # Sauvegarder la mémoire après la génération de la réponse
+        self.save_to_memory(cleaned_prompt, answer)
 
         return answer
 
@@ -101,6 +91,7 @@ class LlamaCppAgent:
                 print(f"[ERREUR] Génération image : {result.stderr}")
                 return "[ERREUR] Échec lors de la génération de l'image."
 
+            # Ajout de la référence à l'image dans le fil de discussion
             return f"#image {output_path}"
 
         except Exception as e:
@@ -114,5 +105,25 @@ class LlamaCppAgent:
         except Exception as e:
             print(f"[ERREUR] [VOIX] {e}")
 
+    def save_to_memory(self, prompt: str, response: str):
+        """Sauvegarde le prompt et la réponse dans la base de données MySQL"""
+        try:
+            self.db_manager.save_memory(prompt, response)
+        except Exception as e:
+            print(f"[ERREUR] [MÉMOIRE] Échec de la sauvegarde en base de données : {str(e)}")
+
     def is_important(self, prompt: str, response: str) -> bool:
         return len(prompt) >= 15
+
+    def save_interaction(self):
+        """Sauvegarde uniquement l'interaction actuelle sans génération de réponse"""
+        prompt = self.text_input.toPlainText()  # Ou tout autre mécanisme pour récupérer l'entrée
+        if prompt.strip():
+            self.agent.save_to_memory(prompt, "Réponse sauvegardée sans génération.")
+            self.display_message("L'interaction a été sauvegardée.")
+        else:
+            self.display_message("Aucune interaction à sauvegarder.")
+
+    def display_message(self, message: str):
+        """Affiche un message dans l'interface"""
+        self.output_text.setPlainText(message)

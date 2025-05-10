@@ -1,11 +1,12 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit,
-    QLabel, QCheckBox, QComboBox, QScrollArea, QFrame
+    QLabel, QCheckBox, QComboBox, QScrollArea
 )
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtGui import QPixmap
 from src.llama_cpp_agent import LlamaCppAgent, LlamaThread
-from gui.memory_window import MemoryViewer # Assure-toi que ce fichier existe
+from gui.memory_window import MemoryViewer
+
 
 class MainWindow(QWidget):
     def __init__(self, model_paths: dict):
@@ -50,10 +51,11 @@ class MainWindow(QWidget):
         self.response_box.setReadOnly(True)
         main_layout.addWidget(self.response_box)
 
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setVisible(False)
-        main_layout.addWidget(self.image_label)
+        # Waiting message
+        self.waiting_label = QLabel("Alice travaille sur votre demande... Veuillez patienter.")
+        self.waiting_label.setAlignment(Qt.AlignCenter)
+        self.waiting_label.setVisible(False)
+        main_layout.addWidget(self.waiting_label)
 
         # Prompt area
         input_layout = QVBoxLayout()
@@ -78,6 +80,13 @@ class MainWindow(QWidget):
 
         main_layout.addLayout(input_layout)
 
+        # Scroll area for displaying images
+        self.scroll_area = QScrollArea()
+        self.image_label = QLabel()  # For displaying images
+        self.scroll_area.setWidget(self.image_label)
+        self.scroll_area.setVisible(False)
+        main_layout.addWidget(self.scroll_area)
+
         self.setLayout(main_layout)
 
     def load_model(self, model_name):
@@ -97,9 +106,25 @@ class MainWindow(QWidget):
         if not prompt:
             return
 
+        # Ajouter automatiquement #image si l'utilisateur demande une image
+        if "image" in prompt.lower() and "#image" not in prompt.lower():
+            prompt += " #image"
+
+        # Ajouter automatiquement #save si l'utilisateur tape "sauvegarde" ou "mémorise"
+        if any(word in prompt.lower() for word in ["#save", "sauvegarde", "mémorise"]):
+            if "#save" not in prompt.lower():
+                prompt += " #save"
+
         self.input_box.clear()
+        self.current_prompt = prompt  # stocker pour affichage
+
+        # Afficher l'indicateur de travail
+        self.waiting_label.setVisible(True)
+
+        # Affichage dans la zone de réponse
         self.response_box.append(f"<b>Vous :</b> {prompt}")
 
+        # Envoyer la requête via le thread
         self.thread = LlamaThread(self.agent, prompt)
         self.thread.response_ready.connect(self.display_response)
         self.thread.start()
@@ -110,13 +135,32 @@ class MainWindow(QWidget):
             self.input_box.setText(f"{text} #save")
             self.send_prompt()
 
-    def display_response(self, response):
+    def display_response(self, prompt: str, response: str):
+        # Détection du mot-clé image
         if "#image" in response:
-            path = response.replace("#image", "").strip()
-            self.image_label.setPixmap(QPixmap(path).scaled(400, 400, Qt.KeepAspectRatio))
-            self.image_label.setVisible(True)
+            image_path = response.split(" ", 1)[-1]  # Récupère le chemin de l'image
+            self.display_image(image_path)
         else:
-            self.image_label.setVisible(False)
+            # Affiche le texte dans le fil de discussion
+            self.display_text(prompt, response)
+
+    def display_image(self, image_path: str):
+        try:
+            # Créez un chemin d'image HTML pour l'afficher dans QTextEdit
+            image_html = f'<img src="{image_path}" width="400" />'  # Vous pouvez ajuster la largeur à votre convenance
+
+            # Ajoutez l'image au QTextEdit sous forme de contenu HTML
+            self.response_box.append(f"<b>Vous :</b> {self.current_prompt}")
+            self.response_box.append("<b>Alice :</b>")
+            self.response_box.append(image_html)  # Affiche l'image dans la zone de texte
+            self.response_box.append("")  # Ligne vide après l'image pour espacer le texte
+
+        except Exception as e:
+            print(f"[ERREUR] Affichage de l'image : {str(e)}")
+
+    def display_text(self, prompt: str, response: str):
+        # Ajoute la réponse dans le fil de discussion
+        self.response_box.append(f"<b>Vous :</b> {prompt}")
         self.response_box.append(f"<b>Alice :</b> {response}")
 
     def open_memory_window(self):
