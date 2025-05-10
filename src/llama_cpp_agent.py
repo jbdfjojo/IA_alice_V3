@@ -58,11 +58,12 @@ class LlamaCppAgent:
 
         response = self.model.create_completion(
             prompt=f"Vous : {cleaned_prompt}\nAlice :",
-            max_tokens=500,
-            temperature=0.9,
-            top_p=0.95,
-            stop=["</s>", "Alice:", "Vous:"]
+            max_tokens=200,  # limite plus basse
+            temperature=0.7,
+            top_p=0.9,
+            stop=["\nVous:", "\nAlice:", "\n"]  # s’arrête dès qu’une nouvelle ligne ou un nouveau tour commence
         )
+
         answer = response['choices'][0]['text'].strip()
 
         # Sauvegarder la mémoire après la génération de la réponse
