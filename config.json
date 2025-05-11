@@ -1,1 +1,8 @@
-{"last_model": "Mistral-7B-Instruct"}
+{
+    "last_model": "Mistral-7B-Instruct",
+    "models": {
+        "Mistral-7B-Instruct": "model/mistral-7b-instruct-v0.2.Q8_0.gguf",
+        "Nous-Hermes": "model/nous-hermes-llama2-13b.Q8_0.gguf"
+    },
+    "voice_enabled": false
+}

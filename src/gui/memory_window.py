@@ -10,7 +10,7 @@ from PyQt5.QtCore import Qt
 
 
 class MemoryViewer(QWidget):
-    def __init__(self):
+    def __init__(self, memory_data):
         super().__init__()
 
         self.setWindowTitle("Mémoire d'Alice")

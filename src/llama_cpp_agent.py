@@ -2,9 +2,9 @@ import os
 import pyttsx3
 from llama_cpp import Llama
 from db.mysql_manager import MySQLManager
-import re
 import subprocess
 from PyQt5.QtCore import QThread, pyqtSignal
+import json
 
 class LlamaThread(QThread):
     response_ready = pyqtSignal(str, str)  # Signal avec deux arguments
@@ -18,19 +18,24 @@ class LlamaThread(QThread):
         try:
             if self.prompt.strip():
                 response = self.agent.generate(self.prompt)
-                # Émettre le signal avec deux arguments : prompt et response
-                self.response_ready.emit(self.prompt, response)  # Passe aussi le prompt et la réponse
+                self.response_ready.emit(self.prompt, response)
             else:
                 self.response_ready.emit(self.prompt, "Aucune entrée valide détectée.")
         except Exception as e:
             self.response_ready.emit(self.prompt, f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}")
 
 class LlamaCppAgent:
-    def __init__(self, model_paths: dict):
-        # Récupération du chemin du modèle "Mistral" par défaut
-        model_path = model_paths.get("Mistral-7B-Instruct") or model_paths.get("Nous-Hermes-2-Mixtral")
-        if not isinstance(model_path, str):
-            raise ValueError("Le chemin du modèle doit être une chaîne de caractères.")
+    def __init__(self, model_paths: dict, config_file="C:/Users/Blazufr/Desktop/IA_alice_V3/config.json"):
+        self.config = self.load_config(config_file)
+        self.model_paths = model_paths  # Stocke les chemins pour potentiellement changer de modèle à chaud
+
+        # Récupère le modèle à partir de la configuration
+        last_model = self.config.get("last_model", "Mistral-7B-Instruct")
+        model_path = model_paths.get(last_model)
+
+        if not model_path:
+            raise ValueError(f"Modèle '{last_model}' non trouvé dans les chemins fournis.")
+
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Modèle introuvable : {model_path}")
 
@@ -41,34 +46,36 @@ class LlamaCppAgent:
         self.db_manager = MySQLManager("localhost", "root", "JOJOJOJO88", "ia_alice")
         self.first_interaction = True
 
+    def load_config(self, config_file):
+        try:
+            with open(config_file, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[ERREUR] Impossible de charger le fichier de configuration : {e}")
+            return {}
+
     def set_speech_enabled(self, enabled: bool):
         self.speech_enabled = enabled
 
     def generate(self, prompt: str) -> str:
         prompt = prompt.strip()
 
-        # Vérifier si le prompt contient "#save" et l'enlever de la chaîne de texte
         if "#save" in prompt:
             cleaned_prompt = prompt.replace("#save", "").strip()
-            self.save_to_memory(cleaned_prompt, "Réponse sauvegardée sans génération.")  # Sauvegarder uniquement
+            self.save_to_memory(cleaned_prompt, "Réponse sauvegardée sans génération.")
             return "L'interaction a été sauvegardée."
 
-        # Continuer la génération de réponse comme d'habitude
-        cleaned_prompt = prompt  # Pas de changement, car #save a été géré précédemment
-
+        cleaned_prompt = prompt
         response = self.model.create_completion(
             prompt=f"Vous : {cleaned_prompt}\nAlice :",
-            max_tokens=200,  # limite plus basse
+            max_tokens=200,
             temperature=0.7,
             top_p=0.9,
-            stop=["\nVous:", "\nAlice:", "\n"]  # s’arrête dès qu’une nouvelle ligne ou un nouveau tour commence
+            stop=["\nVous:", "\nAlice:", "\n"]
         )
 
         answer = response['choices'][0]['text'].strip()
-
-        # Sauvegarder la mémoire après la génération de la réponse
         self.save_to_memory(cleaned_prompt, answer)
-
         return answer
 
     def generate_image(self, prompt: str) -> str:
@@ -92,7 +99,6 @@ class LlamaCppAgent:
                 print(f"[ERREUR] Génération image : {result.stderr}")
                 return "[ERREUR] Échec lors de la génération de l'image."
 
-            # Ajout de la référence à l'image dans le fil de discussion
             return f"#image {output_path}"
 
         except Exception as e:
@@ -107,7 +113,6 @@ class LlamaCppAgent:
             print(f"[ERREUR] [VOIX] {e}")
 
     def save_to_memory(self, prompt: str, response: str):
-        """Sauvegarde le prompt et la réponse dans la base de données MySQL"""
         try:
             self.db_manager.save_memory(prompt, response)
         except Exception as e:
@@ -117,8 +122,7 @@ class LlamaCppAgent:
         return len(prompt) >= 15
 
     def save_interaction(self):
-        """Sauvegarde uniquement l'interaction actuelle sans génération de réponse"""
-        prompt = self.text_input.toPlainText()  # Ou tout autre mécanisme pour récupérer l'entrée
+        prompt = self.text_input.toPlainText()
         if prompt.strip():
             self.agent.save_to_memory(prompt, "Réponse sauvegardée sans génération.")
             self.display_message("L'interaction a été sauvegardée.")
@@ -126,5 +130,4 @@ class LlamaCppAgent:
             self.display_message("Aucune interaction à sauvegarder.")
 
     def display_message(self, message: str):
-        """Affiche un message dans l'interface"""
         self.output_text.setPlainText(message)
