@@ -1,0 +1,41 @@
+bonjour je souhaiterai que tu m'aide a corriger les erreurs et améliorer un projet de IA auto évolutive en python dans un environnement conda.
+je te donne la structure du projet et je souhaite garder les fonctionnalité ( génération de code, génération d'image, quel parle, que je puisse écrire en parlant et la mémoire qui passe par MySQL).
+j'utilise deux model donc je souhaite garder la box pour changer quand je le souhaite.
+le chemin de mon projet est : C:\Users\Blazufr\Desktop\IA_alice_V3.
+je souhaite t'envoyer les fichier suivant : app.py, main_window.py et llama_cpp_agent.py
+  
+
+asset
+images
+model
+src
+main_window.py
+memory.db
+environment.yml
+config.json
+
+model/mistral-7b-instruct-v0.2.Q8_0.gguf
+model/nous-hermes-llama2-13b.Q8_0.gguf
+
+src/agent
+src/db
+src/gui
+src/utils
+src/app.py
+src/llama_cpp_agent.py
+
+src/agent/stable-diffusion-v1-5
+src/agent/generate.py
+src/agent/voice_thread.py
+
+src/db/memory_viewer.py
+src/db/mysql_manager.py
+
+src/gui/main_window.cpp
+src/gui/main_window.ui
+src/gui/memory_window.py
+src/gui/styles.py
+src/gui/voice_thread.py
+
+src/utils/database_handler.py
+src/utils/logger.py

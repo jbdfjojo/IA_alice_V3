@@ -20,16 +20,18 @@ except FileNotFoundError:
 # Récupérer le dernier modèle utilisé
 last_model = config.get("last_model", "Mistral-7B-Instruct")
 
-# Vérifier que le chemin du modèle existe
-selected_model_path = model_paths.get(last_model)
-if not selected_model_path:
-    raise FileNotFoundError(f"Modèle manquant ou chemin invalide : {last_model} -> {selected_model_path}")
+# Vérifier que le modèle sélectionné est valide
+if last_model not in model_paths:
+    raise ValueError(f"Le modèle sélectionné '{last_model}' est invalide dans la configuration.")
 
-# Créer l'agent avec tous les chemins possibles
-agent = LlamaCppAgent(model_paths)  # <-- PAS selected_model_path
+# Récupérer le chemin du modèle sélectionné
+selected_model_path = model_paths[last_model]
+selected_model = "Mistral-7B-Instruct"
+# Créer l'agent avec le modèle sélectionné
+agent = LlamaCppAgent(model_paths=model_paths, selected_model=selected_model) # Passer uniquement le chemin du modèle sélectionné
 
 # Lancer l'application
 app = QApplication(sys.argv)
-window = MainWindow(model_paths)
+window = MainWindow(model_paths)  # Passer les chemins des modèles à la fenêtre
 window.show()
 sys.exit(app.exec_())

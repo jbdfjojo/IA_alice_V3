@@ -25,16 +25,12 @@ class LlamaThread(QThread):
             self.response_ready.emit(self.prompt, f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}")
 
 class LlamaCppAgent:
-    def __init__(self, model_paths: dict, config_file="C:/Users/Blazufr/Desktop/IA_alice_V3/config.json"):
-        self.config = self.load_config(config_file)
-        self.model_paths = model_paths  # Stocke les chemins pour potentiellement changer de modèle à chaud
-
-        # Récupère le modèle à partir de la configuration
-        last_model = self.config.get("last_model", "Mistral-7B-Instruct")
-        model_path = model_paths.get(last_model)
+    def __init__(self, model_paths: dict, selected_model="Mistral-7B-Instruct"):
+        # Récupère le chemin du modèle dans le dictionnaire
+        model_path = model_paths.get(selected_model)
 
         if not model_path:
-            raise ValueError(f"Modèle '{last_model}' non trouvé dans les chemins fournis.")
+            raise ValueError(f"Modèle '{selected_model}' non trouvé dans les chemins fournis.")
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Modèle introuvable : {model_path}")
@@ -46,20 +42,13 @@ class LlamaCppAgent:
         self.db_manager = MySQLManager("localhost", "root", "JOJOJOJO88", "ia_alice")
         self.first_interaction = True
 
-    def load_config(self, config_file):
-        try:
-            with open(config_file, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"[ERREUR] Impossible de charger le fichier de configuration : {e}")
-            return {}
-
     def set_speech_enabled(self, enabled: bool):
         self.speech_enabled = enabled
 
     def generate(self, prompt: str) -> str:
         prompt = prompt.strip()
 
+        # Traitement des commandes spéciales
         if "#save" in prompt:
             cleaned_prompt = prompt.replace("#save", "").strip()
             self.save_to_memory(cleaned_prompt, "Réponse sauvegardée sans génération.")
@@ -124,7 +113,7 @@ class LlamaCppAgent:
     def save_interaction(self):
         prompt = self.text_input.toPlainText()
         if prompt.strip():
-            self.agent.save_to_memory(prompt, "Réponse sauvegardée sans génération.")
+            self.save_to_memory(prompt, "Réponse sauvegardée sans génération.")
             self.display_message("L'interaction a été sauvegardée.")
         else:
             self.display_message("Aucune interaction à sauvegarder.")
