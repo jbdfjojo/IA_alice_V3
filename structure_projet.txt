@@ -2,7 +2,7 @@ bonjour je souhaiterai que tu m'aide a corriger les erreurs et améliorer un pro
 je te donne la structure du projet et je souhaite garder les fonctionnalité ( génération de code, génération d'image, quel parle, que je puisse écrire en parlant et la mémoire qui passe par MySQL).
 j'utilise deux model donc je souhaite garder la box pour changer quand je le souhaite.
 le chemin de mon projet est : C:\Users\Blazufr\Desktop\IA_alice_V3.
-je souhaite t'envoyer les fichier suivant : app.py, main_window.py et llama_cpp_agent.py
+je souhaite te joins la structure du projet et les fichier suivant : app.py, main_window.py et llama_cpp_agent.py
   
 
 asset
@@ -39,3 +39,226 @@ src/gui/voice_thread.py
 
 src/utils/database_handler.py
 src/utils/logger.py
+
+
+APP.py :
+
+import sys
+import json
+from PyQt5.QtWidgets import QApplication
+from llama_cpp_agent import LlamaCppAgent
+from main_window import MainWindow
+
+# Définir les chemins des modèles
+model_paths = {
+    "Mistral-7B-Instruct": "C:/Users/Blazufr/Desktop/IA_alice_V3/model/mistral-7b-instruct-v0.2.Q8_0.gguf",
+    "Nous-Hermes-2-Mixtral": "C:/Users/Blazufr/Desktop/IA_alice_V3/model/nous-hermes-llama2-13b.Q8_0.gguf"
+}
+
+# Charger la configuration
+try:
+    with open("config.json", "r") as f:
+        config = json.load(f)
+except FileNotFoundError:
+    raise FileNotFoundError("Fichier config.json introuvable.")
+
+# Récupérer le dernier modèle utilisé
+last_model = config.get("last_model", "Mistral-7B-Instruct")
+
+# Vérifier que le modèle sélectionné est valide
+if last_model not in model_paths:
+    raise ValueError(f"Le modèle sélectionné '{last_model}' est invalide dans la configuration.")
+
+# Récupérer le chemin du modèle sélectionné
+selected_model_path = model_paths[last_model]
+selected_model = "Mistral-7B-Instruct"
+# Créer l'agent avec le modèle sélectionné
+agent = LlamaCppAgent(model_paths=model_paths, selected_model=selected_model) # Passer uniquement le chemin du modèle sélectionné
+
+# Lancer l'application
+app = QApplication(sys.argv)
+window = MainWindow(model_paths)  # Passer les chemins des modèles à la fenêtre
+window.show()
+sys.exit(app.exec_())
+
+
+
+llama_cpp_agent.py : 
+import os
+import pyttsx3
+from llama_cpp import Llama
+from db.mysql_manager import MySQLManager
+import subprocess
+from PyQt5.QtCore import QThread, pyqtSignal
+import json
+
+class LlamaThread(QThread):
+    response_ready = pyqtSignal(str, str)  # Signal avec deux arguments
+
+    def __init__(self, agent, prompt):
+        super().__init__()
+        self.agent = agent
+        self.prompt = prompt
+
+    def run(self):
+        try:
+            if self.prompt.strip():
+                response = self.agent.generate(self.prompt)
+                self.response_ready.emit(self.prompt, response)
+            else:
+                self.response_ready.emit(self.prompt, "Aucune entrée valide détectée.")
+        except Exception as e:
+            self.response_ready.emit(self.prompt, f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}")
+
+class LlamaCppAgent:
+    def __init__(self, model_paths: dict, selected_model="Mistral-7B-Instruct"):
+        model_path = model_paths.get(selected_model)
+        if not model_path:
+            raise ValueError(f"Modèle '{selected_model}' non trouvé dans les chemins fournis.")
+
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Modèle introuvable : {model_path}")
+
+        self.model_path = model_path
+        self.speech_enabled = True
+        self.engine = pyttsx3.init()
+
+        print(f"[INFO] Chargement du modèle depuis : {model_path}")
+
+        try:
+            self.model = Llama(
+                model_path=self.model_path,
+                n_ctx=1024,
+                n_threads=6,
+                n_gpu_layers=0,
+                seed=42,
+                verbose=True
+            )
+        except Exception as e:
+            print(f"[ERREUR] Échec lors du chargement du modèle : {e}")
+            self.model = None
+
+        self.db_manager = MySQLManager("localhost", "root", "JOJOJOJO88", "ia_alice")
+        self.first_interaction = True
+
+    def set_speech_enabled(self, enabled: bool):
+        self.speech_enabled = enabled
+
+    def process_voice_input(self, voice_input: str):
+        """ Fonction pour traiter l'entrée vocale et générer une réponse """
+        print(f"[VOICE INPUT] Texte reçu : {voice_input}")
+
+        # Filtrage des erreurs d'entrée audio
+        if "timeout" in voice_input.lower() or "audio incompréhensible" in voice_input.lower():
+            return "[ERREUR] Entrée audio invalide."
+
+        # Si l'entrée est vide ou composée uniquement de blancs
+        if not voice_input.strip():
+            return "[ERREUR] Aucune entrée valide détectée."
+
+        response = self.generate(voice_input)  # Appel à la génération du modèle
+        return response
+
+    def generate(self, prompt: str) -> str:
+        """ Fonction pour générer une réponse avec le modèle """
+        try:
+            prompt = prompt.strip()
+
+            # Vérification d'une entrée vide
+            if not prompt:
+                return "[ERREUR] Aucune entrée valide."
+
+            # Génération de la réponse par le modèle
+            response = self.model.create_completion(
+                prompt=f"Vous : {prompt}\nAlice :",
+                max_tokens=200,
+                temperature=0.7,
+                top_p=0.9,
+                stop=["\nVous:", "\nAlice:", "\n"]
+            )
+
+            # Débogage : afficher la réponse brute pour vérifier son contenu
+            print(f"Réponse brute : {response}")
+
+            # Extraire le texte de la réponse JSON
+            if isinstance(response, dict) and "choices" in response:
+                choices = response["choices"]
+                if len(choices) > 0:
+                    answer = choices[0]["text"].strip()
+                else:
+                    answer = "[ERREUR] Le modèle n'a pas généré de texte."
+            else:
+                answer = "[ERREUR] Réponse non valide reçue du modèle."
+
+            # Filtrage des réponses vides ou non pertinentes
+            if not answer or len(answer.split()) < 2:  # Minimum de 2 mots
+                return "[ERREUR] Modèle n'a pas répondu de manière compréhensible."
+
+            # Sauvegarder la réponse et la renvoyer
+            self.save_to_memory(prompt, answer)
+            return answer
+
+        except Exception as e:
+            # Gérer les erreurs de génération
+            return f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}"
+
+    def generate_image(self, prompt: str) -> str:
+        """ Fonction pour générer une image à partir d'un prompt """
+        try:
+            description = prompt.lower().split("image", 1)[-1].strip()
+            if not description:
+                return "[ERREUR] Veuillez décrire l'image après le mot-clé 'image'."
+
+            model_path = "C:/Users/Blazufr/Desktop/IA_alice_V3/src/agent"
+            output_path = "images/generated_image.png"
+
+            result = subprocess.run(
+                ["python", os.path.join(model_path, "generate.py"),
+                 "--prompt", description,
+                 "--output", output_path],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                print(f"[ERREUR IMAGE] {result.stderr}")
+                return "[ERREUR] Échec lors de la génération de l'image."
+
+            return f"#image {output_path}"
+
+        except Exception as e:
+            return f"[ERREUR] Exception lors de la génération de l'image : {str(e)}"
+
+    def speak(self, text: str):
+        """ Fonction pour effectuer la synthèse vocale """
+        try:
+            if self.speech_enabled:
+                self.engine.say(text)
+                self.engine.runAndWait()
+        except Exception as e:
+            print(f"[ERREUR VOCALE] {e}")
+
+    def save_to_memory(self, prompt: str, response: str):
+        """ Fonction pour sauvegarder l'interaction dans la mémoire """
+        try:
+            self.db_manager.save_memory(prompt, response)
+        except Exception as e:
+            print(f"[ERREUR MÉMOIRE] {e}")
+
+    def is_important(self, prompt: str, response: str) -> bool:
+        """ Détermine si l'interaction doit être sauvegardée en fonction de son importance """
+        return len(prompt) >= 15
+
+    def save_interaction(self):
+        """ Fonction pour sauvegarder une interaction dans la mémoire """
+        prompt = self.text_input.toPlainText()
+        if prompt.strip():
+            self.save_to_memory(prompt, "Réponse sauvegardée sans génération.")
+            self.display_message("L'interaction a été sauvegardée.")
+        else:
+            self.display_message("Aucune interaction à sauvegarder.")
+
+    def display_message(self, message: str):
+        """ Affiche un message à l'écran """
+        self.output_text.setPlainText(message)
+
