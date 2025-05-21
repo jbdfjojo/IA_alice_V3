@@ -107,9 +107,19 @@ class LlamaCppAgent:
 
     def generate_image(self, prompt: str) -> str:
         try:
-            description = prompt.lower().split("image", 1)[-1].strip()
+            # Recherche d'une description explicite après le mot 'image'
+            prompt = prompt.lower()
+
+            # Accepte plusieurs formulations
+            for keyword in ["image de", "image d'", "dessine", "crée", "génère"]:
+                if keyword in prompt:
+                    description = prompt.split(keyword, 1)[-1].strip()
+                    break
+            else:
+                return "[ERREUR] Veuillez inclure une description (ex: 'image d’un dragon')."
+
             if not description:
-                return "[ERREUR] Veuillez décrire l'image après le mot-clé 'image'."
+                return "[ERREUR] Description d'image manquante."
 
             script_path = os.path.abspath("src/agent/generate.py")
             output_path = os.path.abspath("images/generated_image.png")
@@ -122,9 +132,9 @@ class LlamaCppAgent:
 
             if result.returncode != 0:
                 print(f"[ERREUR IMAGE] : {result.stderr}")
-                return "[ERREUR] Échec génération d'image."
+                return "[ERREUR] Échec de la génération d'image."
 
-            return f"[Image générée] {output_path}"
+            return f"#image {output_path}"
 
         except Exception as e:
             return f"[ERREUR] Exception génération image : {str(e)}"

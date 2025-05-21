@@ -3,13 +3,18 @@ import json
 import time
 import pyttsx3
 import speech_recognition as sr
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable
+from PyQt5.QtCore import (
+    Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable
+)
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel,
     QCheckBox, QComboBox, QScrollArea, QApplication
 )
+from PyQt5.QtGui import QPixmap, QTextCursor
+
 from llama_cpp_agent import LlamaCppAgent
 from gui.memory_window import MemoryViewer
+
 
 
 # Thread reconnaissance vocale
@@ -25,34 +30,38 @@ class VoiceRecognitionThread(QThread):
         self.mutex = QMutex()
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone(device_index=1)
+        self.last_active_time = time.time()
+        self.max_inactive_duration = 30  # secondes
 
-        # Debug pour afficher les micros dispo
         print("Microphones disponibles :")
         for i, name in enumerate(sr.Microphone.list_microphone_names()):
             print(f"{i}: {name}")
+
 
     def run(self):
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=1)
             while self.running:
-                self.mutex.lock()
-                if self.is_paused or self.is_processing_response:
-                    self.mutex.unlock()
-                    time.sleep(0.1)
+                # Blocage dur pendant la pause
+                if self.is_paused:
+                    print("🎤 Micro en pause (thread bloqué)")
+                    time.sleep(0.5)
                     continue
-                self.mutex.unlock()
 
                 try:
                     print("🎤 En écoute...")
                     audio = self.recognizer.listen(source, timeout=10)
-                    print("🔊 Traitement audio...")
+                    if self.is_paused:  # sécurité supplémentaire après l'écoute
+                        print("🔇 Micro désactivé pendant l'écoute. Abandon du traitement.")
+                        continue
 
+                    print("🔊 Traitement audio...")
                     text = self.recognizer.recognize_google(audio, language="fr-FR").lower()
+                    self.last_active_time = time.time()
                     print(f"[DEBUG] Texte reconnu brut : '{text}'")
 
                     if "alice" in text:
                         print("[DEBUG] Mot-clé 'alice' détecté")
-
                         cleaned_text = text.split("alice", 1)[-1].strip()
                         if cleaned_text:
                             self.is_processing_response = True
@@ -60,7 +69,7 @@ class VoiceRecognitionThread(QThread):
                         else:
                             print("⚠️ Mot-clé détecté, mais rien après.")
                     else:
-                        print("🔇 Aucun mot-clé détecté dans : ", text)
+                        print("🔇 Aucun mot-clé détecté dans :", text)
 
                 except sr.WaitTimeoutError:
                     print("⏱️ Aucun son détecté.")
@@ -71,13 +80,16 @@ class VoiceRecognitionThread(QThread):
                 finally:
                     self.is_processing_response = False
 
+
     def pause(self):
         self.is_paused = True
-        print("🎤 Pause du micro.")
+        print("🔇 Micro mis en pause (is_paused = True)")
 
     def resume(self):
         self.is_paused = False
-        print("🎤 Reprise du micro.")
+        self.last_active_time = time.time()
+        print("🎤 Micro repris (is_paused = False)")
+
 
     def stop(self):
         self.running = False
@@ -155,6 +167,7 @@ class MainWindow(QWidget):
         self.voice_button = QPushButton("🎤 Micro: OFF")
         self.voice_button.setCheckable(True)
         self.voice_button.clicked.connect(self.toggle_voice_input)
+        self.voice_button.setStyleSheet("background-color: lightcoral; font-weight: bold;")
 
         control_layout.addWidget(self.voice_checkbox)
         control_layout.addWidget(self.memory_button)
@@ -200,12 +213,17 @@ class MainWindow(QWidget):
 
     def toggle_voice_input(self):
         self.voice_input_enabled = not self.voice_input_enabled
+
         if self.voice_input_enabled:
             self.voice_button.setText("🎤 Micro: ON")
+            self.voice_button.setStyleSheet("background-color: lightgreen; font-weight: bold;")
             self.voice_recognition_thread.resume()
+            print("🎤 Micro activé par bouton")
         else:
             self.voice_button.setText("🎤 Micro: OFF")
+            self.voice_button.setStyleSheet("background-color: lightcoral; font-weight: bold;")
             self.voice_recognition_thread.pause()
+            print("🔇 Micro désactivé par bouton")
 
     def load_model(self, model_name):
         self.config["last_model"] = model_name
@@ -251,11 +269,42 @@ class MainWindow(QWidget):
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
     def generate_image_from_text(self, text):
-        print(f"[DEBUG] Génération d'image depuis : {text}")
-        result = self.agent.generate_image(text)
-        print(f"[DEBUG] Résultat : {result}")
-        self.response_box.append(result)
+        self.response_box.append(f"<b>[Vous]</b> {text}")
+        self.response_box.append("<b>[Alice]</b> Je vais générer une image... Veuillez patienter ⏳")
+        QApplication.processEvents()
 
+        def run():
+            result = self.agent.generate_image(text)
+            image_path = None
+
+            if "#image" in result:
+                image_path = result.split("#image")[-1].strip()
+                self.response_box.append("<b>[Alice]</b> Voici votre image :")
+            else:
+                self.response_box.append(f"<b>[Alice]</b> {result}")
+                self.voice_recognition_thread.resume()
+                return
+
+            import time, os
+            time.sleep(1)
+            image_path = os.path.normpath(image_path)
+
+            if os.path.exists(image_path):
+                from PyQt5.QtGui import QPixmap
+                pixmap = QPixmap(image_path)
+                if not pixmap.isNull():
+                    # ✅ Intégrer directement l’image redimensionnée dans la conversation
+                    img_html = f'<img src="{image_path}" width="350">'
+                    self.response_box.append(img_html)
+                    print("[DEBUG] Image insérée dans la conversation.")
+                else:
+                    self.response_box.append("<b>[Alice]</b> ⚠️ L’image n’a pas pu être chargée.")
+            else:
+                self.response_box.append("<b>[Alice]</b> ⚠️ Fichier image introuvable.")
+
+            self.voice_recognition_thread.resume()
+
+        QThreadPool.globalInstance().start(RunnableFunc(run))
 
     def generate_code_from_text(self, text):
         self.response_box.append("[Code] (fonction à implémenter)")
