@@ -1,7 +1,7 @@
 # src/agent/generate.py
 import argparse
 import os
-import torch
+import torch_directml
 from diffusers import StableDiffusionPipeline
 
 def generate_image(prompt: str, output_path: str = "images/generated_image.png"):
@@ -17,7 +17,7 @@ def generate_image(prompt: str, output_path: str = "images/generated_image.png")
         pipe = StableDiffusionPipeline.from_pretrained(model_path, safety_checker=None)
 
         # CPU ou GPU selon disponibilité
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = torch_directml.device()
         pipe.to(device)
         print(f"[INFO] Utilisation de l'appareil : {device}")
 

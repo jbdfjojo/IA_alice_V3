@@ -106,11 +106,10 @@ class LlamaCppAgent:
         return self.generate(voice_input)
 
     def generate_image(self, prompt: str) -> str:
-        """ Génère une image à partir d'un prompt """
         try:
             description = prompt.lower().split("image", 1)[-1].strip()
             if not description:
-                return "[ERREUR] Veuillez décrire l'image."
+                return "[ERREUR] Veuillez décrire l'image après le mot-clé 'image'."
 
             script_path = os.path.abspath("src/agent/generate.py")
             output_path = os.path.abspath("images/generated_image.png")
@@ -125,9 +124,11 @@ class LlamaCppAgent:
                 print(f"[ERREUR IMAGE] : {result.stderr}")
                 return "[ERREUR] Échec génération d'image."
 
-            return f"#image {output_path}"
+            return f"[Image générée] {output_path}"
+
         except Exception as e:
             return f"[ERREUR] Exception génération image : {str(e)}"
+
 
     def save_to_memory(self, prompt: str, response: str):
         """ Enregistre l'échange dans la mémoire MySQL """

@@ -251,8 +251,11 @@ class MainWindow(QWidget):
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
     def generate_image_from_text(self, text):
+        print(f"[DEBUG] Génération d'image depuis : {text}")
         result = self.agent.generate_image(text)
+        print(f"[DEBUG] Résultat : {result}")
         self.response_box.append(result)
+
 
     def generate_code_from_text(self, text):
         self.response_box.append("[Code] (fonction à implémenter)")
