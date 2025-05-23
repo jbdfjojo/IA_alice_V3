@@ -3,27 +3,7 @@ import json
 import pyttsx3
 import subprocess
 from llama_cpp import Llama
-from PyQt5.QtCore import QThread, pyqtSignal
 from db.mysql_manager import MySQLManager
-
-
-class LlamaThread(QThread):
-    response_ready = pyqtSignal(str, str)
-
-    def __init__(self, agent, prompt):
-        super().__init__()
-        self.agent = agent
-        self.prompt = prompt
-
-    def run(self):
-        try:
-            if self.prompt.strip():
-                response = self.agent.generate(self.prompt)
-                self.response_ready.emit(self.prompt, response)
-            else:
-                self.response_ready.emit(self.prompt, "Aucune entrée valide détectée.")
-        except Exception as e:
-            self.response_ready.emit(self.prompt, f"[ERREUR] [AGENT] : {str(e)}")
 
 
 class LlamaCppAgent:
@@ -55,7 +35,6 @@ class LlamaCppAgent:
         self.speech_enabled = enabled
 
     def speak(self, text: str):
-        """ Synthèse vocale avec gestion des erreurs """
         if self.speech_enabled and text.strip():
             try:
                 self.engine.say(text)
@@ -64,7 +43,6 @@ class LlamaCppAgent:
                 print(f"[ERREUR VOCALE] : {e}")
 
     def generate(self, prompt: str) -> str:
-        """ Génère une réponse à partir du prompt donné """
         if not self.model:
             return "[ERREUR] Modèle non initialisé."
         prompt = prompt.strip()
@@ -77,10 +55,9 @@ class LlamaCppAgent:
                 max_tokens=200,
                 temperature=0.7,
                 top_p=0.9,
-                stop=["\nVous:", "\nAlice:", "\n"]
+                stop=["\nVous:", "\nAlice:"]
             )
 
-            # Afficher la réponse brute (utile pour debug)
             print(f"[DEBUG] Réponse brute : {result}")
 
             if isinstance(result, dict) and "choices" in result and result["choices"]:
@@ -96,21 +73,38 @@ class LlamaCppAgent:
         except Exception as e:
             return f"[ERREUR] Erreur génération : {str(e)}"
 
-    def process_voice_input(self, voice_input: str):
-        """ Traitement de l'entrée vocale """
-        print(f"[VOICE INPUT] : {voice_input}")
-        if not voice_input.strip():
-            return "[ERREUR] Aucune entrée détectée."
-        if "timeout" in voice_input.lower() or "audio incompréhensible" in voice_input.lower():
-            return "[ERREUR] Entrée audio invalide."
-        return self.generate(voice_input)
+    def generate_code(self, user_request: str, language: str = "Python") -> str:
+        try:
+            prompt = (
+                f"Écris uniquement le code complet en {language} pour : {user_request.strip()}.\n"
+                f"Donne uniquement le code entre balises triple backticks (```), sans aucun commentaire ou explication."
+            )
+
+            response = self.model.create_completion(
+                prompt=prompt,
+                max_tokens=500,
+                temperature=0.2,
+                top_p=0.9,
+                stop=[]  # on ne force pas l'arrêt
+            )
+
+            print("[DEBUG] Réponse brute :")
+            print(response)
+
+            if "choices" in response and response["choices"]:
+                text = response["choices"][0]["text"].strip()
+                print("[DEBUG] Contenu généré :")
+                print(repr(text))
+                return text
+
+            return "[ERREUR] Réponse invalide"
+
+        except Exception as e:
+            return f"[ERREUR] Exception : {e}"
 
     def generate_image(self, prompt: str) -> str:
         try:
-            # Recherche d'une description explicite après le mot 'image'
             prompt = prompt.lower()
-
-            # Accepte plusieurs formulations
             for keyword in ["image de", "image d'", "dessine", "crée", "génère"]:
                 if keyword in prompt:
                     description = prompt.split(keyword, 1)[-1].strip()
@@ -139,13 +133,19 @@ class LlamaCppAgent:
         except Exception as e:
             return f"[ERREUR] Exception génération image : {str(e)}"
 
-
     def save_to_memory(self, prompt: str, response: str):
-        """ Enregistre l'échange dans la mémoire MySQL """
         try:
             self.db_manager.save_memory(prompt, response)
         except Exception as e:
             print(f"[ERREUR MÉMOIRE] : {e}")
+
+    def process_voice_input(self, voice_input: str):
+        print(f"[VOICE INPUT] : {voice_input}")
+        if not voice_input.strip():
+            return "[ERREUR] Aucune entrée détectée."
+        if "timeout" in voice_input.lower() or "audio incompréhensible" in voice_input.lower():
+            return "[ERREUR] Entrée audio invalide."
+        return self.generate(voice_input)
 
     def is_important(self, prompt: str, response: str) -> bool:
         return len(prompt) >= 15
