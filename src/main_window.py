@@ -8,7 +8,7 @@ import re
 from html import escape
 
 # PyQt5 - Core
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot
 
 # PyQt5 - Widgets
 from PyQt5.QtWidgets import (
@@ -191,6 +191,20 @@ class MainWindow(QWidget):
         self.input_box.setPlaceholderText("Entrez votre message ici...")
         layout.addWidget(self.input_box)
 
+        # 📸 Label pour afficher l’image générée
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("padding: 10px; background-color: #1e1e1e; border-radius: 8px;")
+        self.image_label.setVisible(False)  # Par défaut cachée
+
+        # 📜 Scroll si image trop grande
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidget(self.image_label)
+        self.scroll_area.setVisible(False)
+
+        layout.addWidget(self.scroll_area)
+
         button_layout = QHBoxLayout()
         self.send_button = QPushButton("Envoyer")
         self.send_button.clicked.connect(self.send_prompt)
@@ -200,12 +214,6 @@ class MainWindow(QWidget):
         button_layout.addWidget(self.save_button)
 
         layout.addLayout(button_layout)
-
-        self.image_label = QLabel()
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidget(self.image_label)
-        self.scroll_area.setVisible(False)
-        layout.addWidget(self.scroll_area)
 
         self.setLayout(layout)
 
@@ -255,7 +263,6 @@ class MainWindow(QWidget):
                 print("[DEBUG] Appel à generate_model_response()")
                 self.generate_model_response(text)
 
-
     def generate_code_from_text(self, text):
         print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
         self.response_box.append(f"<b>[Vous]</b> {text}")
@@ -266,11 +273,8 @@ class MainWindow(QWidget):
             language = self.language_selector.currentText()
             code_response = self.agent.generate_code(text, language=language)
             print("[DEBUG] Code brut retourné :", repr(code_response))
-            match = re.search(r"```(?:\w+)?\s*(.*?)```", code_response, re.DOTALL)
-            if match:
-                extracted_code = match.group(1).strip()
-            else:
-                extracted_code = code_response.strip()
+            match = re.search(r"```(?:\\w+)?\\s*(.*?)```", code_response, re.DOTALL)
+            extracted_code = match.group(1).strip() if match else code_response.strip()
 
             try:
                 lexer = get_lexer_by_name(language.lower(), stripall=True)
@@ -283,7 +287,7 @@ class MainWindow(QWidget):
             html_block = f'<div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;">{highlighted}</div>'
             self.response_box.append("<b>[Alice]</b> Voici le code généré :<br>")
             self.response_box.append(html_block)
-            self.response_box.append('<div style="background: none; color: black; padding: 0; margin-top: 10px;"></div>')
+            self.response_box.append('<div style="background-color: transparent; color: black; margin: 10px 0;">—</div>')
 
             if self.voice_checkbox.isChecked():
                 self.agent.speak("Voici le code généré.")
@@ -291,32 +295,46 @@ class MainWindow(QWidget):
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
-
-
-
     def generate_image_from_text(self, text):
         self.response_box.append(f"<b>[Vous]</b> {text}")
         self.response_box.append("<b>[Alice]</b> Je vais générer une image... Veuillez patienter ⏳")
         QApplication.processEvents()
 
         def run():
+            print("[DEBUG] → Début de run() image")
             result = self.agent.generate_image(text)
+            print("[DEBUG] >>> resultat chemin generation image :", result)
             image_path = result.split("#image")[-1].strip() if "#image" in result else None
+            print("[DEBUG] >>> resultat chemin image_path :", image_path)
 
-            def display():
-                if image_path and os.path.exists(image_path):
-                    pixmap = QPixmap(image_path)
-                    if not pixmap.isNull():
-                        img_html = f'<div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;"><img src="{image_path}" width="350"></div>'
-                        self.response_box.append("<b>[Alice]</b> Voici votre image :")
-                        self.response_box.append(img_html)
-                else:
-                    self.response_box.append(f"<b>[Alice]</b> {result}")
-                self.voice_recognition_thread.resume()
+            # Stocke temporairement le chemin d’image
+            self._last_generated_image = image_path
 
-            QTimer.singleShot(0, display)
+            # Appelle le slot d'affichage depuis le thread principal
+            QMetaObject.invokeMethod(self, "display_generated_image", Qt.QueuedConnection)
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
+
+    @pyqtSlot()
+    def display_generated_image(self):
+        image_path = getattr(self, "_last_generated_image", None)
+        print("[DEBUG] → Exécution du SLOT display_generated_image()")
+        if image_path and os.path.exists(image_path):
+            full_path = os.path.abspath(image_path)
+            pixmap = QPixmap(full_path)
+            print(f"[DEBUG] Chargement pixmap depuis : {full_path} | Null ? {pixmap.isNull()}")
+
+            if not pixmap.isNull():
+                self.image_label.setPixmap(pixmap)
+                self.image_label.setVisible(True)
+                self.scroll_area.setVisible(True)
+                self.response_box.append("<b>[Alice]</b> Voici votre image affichée ci-dessous 👇")
+            else:
+                self.response_box.append("<b>[Alice]</b> L'image est invalide ou corrompue.")
+        else:
+            self.response_box.append(f"<b>[Alice]</b> Erreur : image introuvable.")
+
+        self.voice_recognition_thread.resume()
 
 
 
@@ -327,7 +345,7 @@ class MainWindow(QWidget):
 
         def run():
             response = self.agent.generate(prompt)
-            print("[DEBUG] R\u00e9ponse brute :", response)
+            print("[DEBUG] Réponse brute :", response)
             self.response_box.append(f"<b>[Alice]</b> {escape(response)}")
             self.waiting_label.setVisible(False)
             if self.voice_checkbox.isChecked():
@@ -337,13 +355,10 @@ class MainWindow(QWidget):
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
-
-
     def send_prompt(self):
         text = self.input_box.toPlainText().strip()
         if text:
             self.response_box.append(f"[Vous] {text}")
-            # Nouvelle logique ici :
             text_lower = text.lower()
             if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
                 print("[DEBUG] Appel à generate_image_from_text()")
@@ -375,4 +390,3 @@ class MainWindow(QWidget):
         cursor.select(QTextCursor.Document)
         pyperclip.copy(cursor.selectedText())
         QMessageBox.information(self, "Copié", "Code copié dans le presse-papiers.")
-
