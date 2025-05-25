@@ -4,10 +4,11 @@ import time
 import pyttsx3
 import speech_recognition as sr
 import pyperclip
+import re
 from html import escape
 
 # PyQt5 - Core
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaType
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG
 
 # PyQt5 - Widgets
 from PyQt5.QtWidgets import (
@@ -17,6 +18,11 @@ from PyQt5.QtWidgets import (
 
 # PyQt5 - GUI
 from PyQt5.QtGui import QPixmap, QTextCursor
+
+# Pygments pour coloration syntaxique
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name
+from pygments.formatters import HtmlFormatter
 
 # Agent IA
 from llama_cpp_agent import LlamaCppAgent
@@ -98,6 +104,7 @@ class RunnableFunc(QRunnable):
         self.func = func
 
     def run(self):
+        print("[DEBUG] RunnableFunc lancé")
         self.func()
 
 
@@ -159,6 +166,10 @@ class MainWindow(QWidget):
         self.language_selector = QComboBox()
         self.language_selector.addItems(["Python", "JavaScript", "C++", "HTML", "SQL"])
         control_layout.addWidget(self.language_selector)
+
+        self.force_code_button = QPushButton("Tester Code Vocal")
+        self.force_code_button.clicked.connect(lambda: self.on_text_recognized("alice crée un code python pour afficher l'heure"))
+        control_layout.addWidget(self.force_code_button)
 
         control_layout.addWidget(self.voice_checkbox)
         control_layout.addWidget(self.memory_button)
@@ -226,38 +237,61 @@ class MainWindow(QWidget):
             print(f"[ERREUR CHARGEMENT MODÈLE] : {e}")
 
     def on_text_recognized(self, text):
+        print("[DEBUG] Texte brut reconnu :", text)
         if self.is_user_speaking:
             self.response_box.append(f"[Vous] {text}")
             self.input_box.setText(text)
             self.is_user_speaking = False
             self.voice_recognition_thread.pause()
-            if "image" in text.lower():
+            text_lower = text.lower()
+
+            if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
+                print("[DEBUG] Appel à generate_image_from_text()")
                 self.generate_image_from_text(text)
-            elif any(kw in text.lower() for kw in ["code", "fonction", "script", "programme", "algo"]):
+            elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
+                print("[DEBUG] Appel à generate_code_from_text()")
                 self.generate_code_from_text(text)
             else:
+                print("[DEBUG] Appel à generate_model_response()")
                 self.generate_model_response(text)
 
-    def generate_model_response(self, prompt):
-        self.waiting_label.setVisible(True)
+
+    def generate_code_from_text(self, text):
+        print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
+        self.response_box.append(f"<b>[Vous]</b> {text}")
+        self.response_box.append("<b>[Alice]</b> Je génère un code... ⌨️")
         QApplication.processEvents()
 
         def run():
-            response = self.agent.generate(prompt)
-            print("[DEBUG] Réponse brute :", response)
-            
-            # ✅ AJOUTE BIEN LA LIGNE CI-DESSOUS :
-            self.response_box.append(f"<b>[Alice]</b> {escape(response)}")
+            language = self.language_selector.currentText()
+            code_response = self.agent.generate_code(text, language=language)
+            print("[DEBUG] Code brut retourné :", repr(code_response))
+            match = re.search(r"```(?:\w+)?\s*(.*?)```", code_response, re.DOTALL)
+            if match:
+                extracted_code = match.group(1).strip()
+            else:
+                extracted_code = code_response.strip()
 
-            self.waiting_label.setVisible(False)
+            try:
+                lexer = get_lexer_by_name(language.lower(), stripall=True)
+            except Exception:
+                lexer = get_lexer_by_name("text", stripall=True)
+
+            formatter = HtmlFormatter(style="monokai", noclasses=True)
+            highlighted = highlight(extracted_code, lexer, formatter)
+
+            html_block = f'<div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;">{highlighted}</div>'
+            self.response_box.append("<b>[Alice]</b> Voici le code généré :<br>")
+            self.response_box.append(html_block)
+            self.response_box.append('<div style="background: none; color: black; padding: 0; margin-top: 10px;"></div>')
 
             if self.voice_checkbox.isChecked():
-                self.agent.speak(response)
-
-            self.is_user_speaking = True
+                self.agent.speak("Voici le code généré.")
             self.voice_recognition_thread.resume()
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
+
+
 
 
     def generate_image_from_text(self, text):
@@ -273,7 +307,7 @@ class MainWindow(QWidget):
                 if image_path and os.path.exists(image_path):
                     pixmap = QPixmap(image_path)
                     if not pixmap.isNull():
-                        img_html = f'<img src="{image_path}" width="350">'
+                        img_html = f'<div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;"><img src="{image_path}" width="350"></div>'
                         self.response_box.append("<b>[Alice]</b> Voici votre image :")
                         self.response_box.append(img_html)
                 else:
@@ -284,41 +318,42 @@ class MainWindow(QWidget):
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
-    def generate_code_from_text(self, text):
-        self.response_box.append(f"<b>[Vous]</b> {text}")
-        self.response_box.append("<b>[Alice]</b> Je génère un code... ⌨️")
+
+
+    def generate_model_response(self, prompt):
+        print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
+        self.waiting_label.setVisible(True)
         QApplication.processEvents()
 
         def run():
-            language = self.language_selector.currentText()
-            code = self.agent.generate_code(text, language=language)
-
-            print("[DEBUG] Code brut retourné :", repr(code))
-
-            if not code or "ERREUR" in code:
-                self.response_box.append(f"<b>[Alice]</b> {code}")
-                self.voice_recognition_thread.resume()
-                return
-
-            self.response_box.append("<b>[Alice]</b> Voici le code généré :<br>")
-            self.response_box.append(f"<pre><code>{escape(code)}</code></pre>")
-
+            response = self.agent.generate(prompt)
+            print("[DEBUG] R\u00e9ponse brute :", response)
+            self.response_box.append(f"<b>[Alice]</b> {escape(response)}")
+            self.waiting_label.setVisible(False)
             if self.voice_checkbox.isChecked():
-                self.agent.speak("Voici le code généré.")
-
+                self.agent.speak(response)
+            self.is_user_speaking = True
             self.voice_recognition_thread.resume()
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
 
 
-
-
     def send_prompt(self):
-        prompt = self.input_box.toPlainText().strip()
-        if prompt:
-            self.response_box.append(f"[Vous] {prompt}")
-            self.generate_model_response(prompt)
+        text = self.input_box.toPlainText().strip()
+        if text:
+            self.response_box.append(f"[Vous] {text}")
+            # Nouvelle logique ici :
+            text_lower = text.lower()
+            if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
+                print("[DEBUG] Appel à generate_image_from_text()")
+                self.generate_image_from_text(text)
+            elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
+                print("[DEBUG] Appel à generate_code_from_text()")
+                self.generate_code_from_text(text)
+            else:
+                print("[DEBUG] Appel à generate_model_response()")
+                self.generate_model_response(text)
 
     def save_prompt(self):
         prompt = self.input_box.toPlainText().strip()
@@ -340,3 +375,4 @@ class MainWindow(QWidget):
         cursor.select(QTextCursor.Document)
         pyperclip.copy(cursor.selectedText())
         QMessageBox.information(self, "Copié", "Code copié dans le presse-papiers.")
+
