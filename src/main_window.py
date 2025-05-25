@@ -311,32 +311,26 @@ class MainWindow(QWidget):
             self._last_generated_image = image_path
 
             # Appelle le slot d'affichage depuis le thread principal
-            QMetaObject.invokeMethod(self, "display_generated_image", Qt.QueuedConnection)
+            self.display_generated_image(image_path)
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
     @pyqtSlot()
-    def display_generated_image(self):
-        image_path = getattr(self, "_last_generated_image", None)
-        print("[DEBUG] → Exécution du SLOT display_generated_image()")
-        if image_path and os.path.exists(image_path):
-            full_path = os.path.abspath(image_path)
-            pixmap = QPixmap(full_path)
-            print(f"[DEBUG] Chargement pixmap depuis : {full_path} | Null ? {pixmap.isNull()}")
+    def display_generated_image(self, image_path):
+        full_path = os.path.abspath(image_path)
+        pixmap = QPixmap(full_path)
+        print(f"[DEBUG] Chargement pixmap depuis : {full_path} | Null ? {pixmap.isNull()}")
 
-            if not pixmap.isNull():
-                self.image_label.setPixmap(pixmap)
-                self.image_label.setVisible(True)
-                self.scroll_area.setVisible(True)
-                self.response_box.append("<b>[Alice]</b> Voici votre image affichée ci-dessous 👇")
-            else:
-                self.response_box.append("<b>[Alice]</b> L'image est invalide ou corrompue.")
+        if not pixmap.isNull():
+            img_html = f"""
+            <div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+                <img src="{full_path.replace(os.sep, '/')}" width="350">
+            </div>
+            """
+            self.response_box.append("<b>[Alice]</b> Voici votre image générée :")
+            self.response_box.append(img_html)
         else:
-            self.response_box.append(f"<b>[Alice]</b> Erreur : image introuvable.")
-
-        self.voice_recognition_thread.resume()
-
-
+            self.response_box.append("<b>[Alice]</b> Erreur : L'image est invalide.")
 
     def generate_model_response(self, prompt):
         print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
