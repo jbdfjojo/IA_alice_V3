@@ -10,11 +10,13 @@ from PyQt5.QtCore import Qt
 
 
 class MemoryViewer(QWidget):
-    def __init__(self, memory_data):
+    def __init__(self, memory_data, style_sheet=None):
         super().__init__()
 
         self.setWindowTitle("Mémoire d'Alice")
         self.resize(800, 600)
+        if style_sheet:  # Applique le style si fourni
+            self.setStyleSheet(style_sheet)
 
         # Connexion MySQL
         try:

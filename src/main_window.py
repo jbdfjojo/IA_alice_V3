@@ -7,7 +7,7 @@ import pyperclip
 import re
 from html import escape
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel,
     QCheckBox, QComboBox, QMessageBox, QScrollArea, QApplication
@@ -159,21 +159,45 @@ class MainWindow(QWidget):
         QApplication.setPalette(dark_palette)
 
         self.setStyleSheet("""
-            QTextEdit, QLineEdit, QLabel {
-                color: white;
-                background-color: #1e1e1e;
-            }
-            QPushButton {
-                background-color: #3a3a3a;
-                color: white;
-                font-weight: bold;
-                padding: 6px;
-            }
-            QComboBox, QCheckBox {
-                color: white;
-                background-color: #2e2e2e;
-            }
-        """)
+            QWidget {
+                        background-color: #121212;
+                        color: #f0f0f0;
+                        font-family: Consolas, monospace;
+                        font-size: 14px;
+                    }
+                    QScrollArea {
+                        background-color: #121212;
+                    }
+                    QTextEdit {
+                        background-color: #1e1e1e;
+                        color: #f0f0f0;
+                        border: 1px solid #333;
+                        border-radius: 5px;
+                        padding: 6px;
+                    }
+                    QPushButton {
+                        background-color: #2d2d2d;
+                        color: white;
+                        border: 1px solid #444;
+                        padding: 6px;
+                        border-radius: 6px;
+                    }
+                    QPushButton:hover {
+                        background-color: #3a3a3a;
+                    }
+                    QLabel {
+                        color: #f0f0f0;
+                    }
+                    QComboBox {
+                        background-color: #1e1e1e;
+                        color: #f0f0f0;
+                        border: 1px solid #333;
+                        padding: 4px;
+                    }
+                    QCheckBox {
+                        color: #f0f0f0;
+                    }
+                """)
 
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -280,10 +304,12 @@ class MainWindow(QWidget):
 
     def generate_code_from_text(self, text):
         print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
+        self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
         self.response_box.append("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️")
         QApplication.processEvents()
 
         def run():
+            print("[DEBUG] → Début du thread de génération de code")
             language = self.language_selector.currentText()
             code_response = self.agent.generate_code(text, language=language)
             print("[DEBUG] Code brut retourné :", repr(code_response))
@@ -299,30 +325,34 @@ class MainWindow(QWidget):
             formatter = HtmlFormatter(style="monokai", noclasses=True)
             highlighted = highlight(extracted_code, lexer, formatter)
 
-            self.response_box.append('<b style="color: lightgreen">[Alice]</b> Voici le code généré :<br>')
-
-            code_html = f'''
-            <div style="
-                background-color: #1e1e1e;
-                color: white;
-                padding: 12px;
-                border-radius: 10px;
-                margin-top: 5px;
-                margin-bottom: 15px;
-                font-family: Consolas, monospace;
-                font-size: 14px;
-            ">
-            {highlighted}
-            </div>
-            '''
-            self.response_box.append(code_html)
-            self.response_box.append('<div style="background: none; color: white; margin: 5px 0;"></div>')
-
-            if self.voice_checkbox.isChecked():
-                self.agent.speak("Voici le code généré.")
-            self.voice_recognition_thread.resume()
+            # Mise à jour de l'interface via invokeMethod
+            QMetaObject.invokeMethod(self, "append_code_block", Qt.QueuedConnection, Q_ARG(str, highlighted))
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
+
+    @pyqtSlot(str)
+    def append_code_block(self, highlighted_code):
+        print("[DEBUG] → append_code_block() appelé")
+
+        self.response_box.append('<b style="color: lightgreen">[Alice]</b> Voici le code généré :<br>')
+        code_html = f'''
+        <div style="
+            background-color: #1e1e1e;
+            color: white;
+            padding: 12px;
+            border-radius: 10px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+            font-family: Consolas, monospace;
+            font-size: 14px;
+        ">{highlighted_code}</div>
+        '''
+        self.response_box.append(code_html)
+        self.response_box.append('<div style="background: none; color: white; margin: 5px 0;"></div>')
+
+        if self.voice_checkbox.isChecked():
+            self.agent.speak("Voici le code généré.")
+        self.voice_recognition_thread.resume()
 
 
     def generate_image_from_text(self, text):
@@ -336,6 +366,9 @@ class MainWindow(QWidget):
             print("[DEBUG] >>> resultat chemin generation image :", result)
             image_path = result.split("#image")[-1].strip() if "#image" in result else None
             print("[DEBUG] >>> resultat chemin image_path :", image_path)
+
+            print("→ Existe ?", os.path.exists(image_path))
+            print("→ Chemin absolu :", os.path.abspath(image_path))
 
             self.image_path_result = image_path  # Stocke dans l'instance
             QTimer.singleShot(0, self.display_generated_image)  # Appel Qt-thread safe
@@ -376,7 +409,7 @@ class MainWindow(QWidget):
         def run():
             response = self.agent.generate(prompt)
             print("[DEBUG] Réponse brute :", response)
-            self.response_box.append(f"<b>[Alice]</b> <span style='color: black;'>{escape(response)}</span>")
+            self.response_box.append(f"<b>[Alice]</b> <span style='color: white;'>{escape(response)}</span>")
             self.waiting_label.setVisible(False)
             if self.voice_checkbox.isChecked():
                 self.agent.speak(response)
@@ -406,8 +439,10 @@ class MainWindow(QWidget):
 
     def open_memory_window(self):
         from gui.memory_window import MemoryViewer
-        mem_window = MemoryViewer(self.agent)
-        mem_window.show()
+        self.mem_window = MemoryViewer(self.agent, style_sheet=self.styleSheet())  # <-- garde une référence
+        self.mem_window.show()
+
+
 
     def closeEvent(self, event):
         self.voice_recognition_thread.stop()
