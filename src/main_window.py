@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel,
     QCheckBox, QComboBox, QMessageBox, QScrollArea, QApplication
 )
-from PyQt5.QtGui import QPixmap, QTextCursor
+from PyQt5.QtGui import QPixmap, QTextCursor, QPalette, QColor
 
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
@@ -21,6 +21,14 @@ from pygments.formatters import HtmlFormatter
 from llama_cpp_agent import LlamaCppAgent
 
 from diffusers import StableDiffusionPipeline
+
+try:
+    from PyQt5.QtCore import qRegisterMetaType
+    from PyQt5.QtGui import QTextCursor
+    qRegisterMetaType(QTextCursor, "QTextCursor")
+except Exception as e:
+    print(f"Warning qRegisterMetaType QTextCursor skipped: {e}")
+
 
 class VoiceRecognitionThread(QThread):
     result_signal = pyqtSignal(str)
@@ -125,11 +133,47 @@ class MainWindow(QWidget):
         self.is_user_speaking = True
 
         self.setup_ui()
+        self.apply_dark_theme()
 
         last_model = self.config.get("last_model", "Mistral-7B-Instruct")
         index = self.model_selector.findText(last_model)
         self.model_selector.setCurrentIndex(index if index != -1 else 0)
         self.voice_checkbox.setChecked(self.config.get("voice_enabled", True))
+
+    def apply_dark_theme(self):
+        dark_palette = QPalette()
+        dark_palette.setColor(QPalette.Window, QColor(30, 30, 30))
+        dark_palette.setColor(QPalette.WindowText, Qt.white)
+        dark_palette.setColor(QPalette.Base, QColor(25, 25, 25))
+        dark_palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+        dark_palette.setColor(QPalette.ToolTipBase, Qt.white)
+        dark_palette.setColor(QPalette.ToolTipText, Qt.white)
+        dark_palette.setColor(QPalette.Text, Qt.white)
+        dark_palette.setColor(QPalette.Button, QColor(53, 53, 53))
+        dark_palette.setColor(QPalette.ButtonText, Qt.white)
+        dark_palette.setColor(QPalette.BrightText, Qt.red)
+        dark_palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+        dark_palette.setColor(QPalette.HighlightedText, Qt.black)
+
+        self.setPalette(dark_palette)
+        QApplication.setPalette(dark_palette)
+
+        self.setStyleSheet("""
+            QTextEdit, QLineEdit, QLabel {
+                color: white;
+                background-color: #1e1e1e;
+            }
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                font-weight: bold;
+                padding: 6px;
+            }
+            QComboBox, QCheckBox {
+                color: white;
+                background-color: #2e2e2e;
+            }
+        """)
 
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -220,7 +264,8 @@ class MainWindow(QWidget):
     def on_text_recognized(self, text):
         print("[DEBUG] Texte brut reconnu :", text)
         if self.is_user_speaking:
-            self.response_box.append(f"[Vous] {text}")
+            self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
+
             self.input_box.setText(text)
             self.is_user_speaking = False
             self.voice_recognition_thread.pause()
@@ -235,8 +280,7 @@ class MainWindow(QWidget):
 
     def generate_code_from_text(self, text):
         print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
-        self.response_box.append(f"<b>[Vous]</b> {text}")
-        self.response_box.append("<b>[Alice]</b> Je génère un code... ⌨️")
+        self.response_box.append("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️")
         QApplication.processEvents()
 
         def run():
@@ -245,10 +289,7 @@ class MainWindow(QWidget):
             print("[DEBUG] Code brut retourné :", repr(code_response))
 
             match = re.search(r"```(?:\w+)?\s*(.*?)```", code_response, re.DOTALL)
-            if match:
-                extracted_code = match.group(1).strip()
-            else:
-                extracted_code = code_response.strip()
+            extracted_code = match.group(1).strip() if match else code_response.strip()
 
             try:
                 lexer = get_lexer_by_name(language.lower(), stripall=True)
@@ -258,21 +299,31 @@ class MainWindow(QWidget):
             formatter = HtmlFormatter(style="monokai", noclasses=True)
             highlighted = highlight(extracted_code, lexer, formatter)
 
-            html_block = f'''
-            <div style="background-color: #1e1e1e; color: #ffffff; padding: 10px; border-radius: 8px; margin: 10px 0; font-family: monospace;">
+            self.response_box.append('<b style="color: lightgreen">[Alice]</b> Voici le code généré :<br>')
+
+            code_html = f'''
+            <div style="
+                background-color: #1e1e1e;
+                color: white;
+                padding: 12px;
+                border-radius: 10px;
+                margin-top: 5px;
+                margin-bottom: 15px;
+                font-family: Consolas, monospace;
+                font-size: 14px;
+            ">
             {highlighted}
             </div>
             '''
-            self.response_box.append("<b>[Alice]</b> Voici le code généré :")
-            self.response_box.append(html_block)
-            self.response_box.append('<div style="all: unset; margin-top: 10px;"></div>')  # ← reset style
+            self.response_box.append(code_html)
+            self.response_box.append('<div style="background: none; color: white; margin: 5px 0;"></div>')
 
             if self.voice_checkbox.isChecked():
                 self.agent.speak("Voici le code généré.")
-
             self.voice_recognition_thread.resume()
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
+
 
     def generate_image_from_text(self, text):
         self.response_box.append(f"<b>[Vous]</b> {text}")
@@ -338,7 +389,7 @@ class MainWindow(QWidget):
     def send_prompt(self):
         text = self.input_box.toPlainText().strip()
         if text:
-            self.response_box.append(f"[Vous] {text}")
+            self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
             text_lower = text.lower()
             if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
                 self.generate_image_from_text(text)
