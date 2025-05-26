@@ -57,16 +57,19 @@ class LlamaCppAgent:
         if not prompt:
             return "[ERREUR] Prompt vide."
 
+        should_save = "#save" in prompt
+        cleaned_prompt = prompt.replace("#save", "").strip()
+
         # 🔥 Forcer le français dans toutes les réponses
-        prompt = (
+        final_prompt = (
             "Tu es une IA qui parle exclusivement en français.\n"
             "Réponds toujours de façon claire et concise.\n"
-            f"Utilisateur : {prompt}\nAlice :"
+            f"Utilisateur : {cleaned_prompt}\nAlice :"
         )
 
         try:
             result = self.model.create_completion(
-                prompt=prompt,
+                prompt=final_prompt,
                 max_tokens=400,
                 temperature=0.7,
                 top_p=0.9,
@@ -81,10 +84,13 @@ class LlamaCppAgent:
             if not answer or len(answer.split()) < 2:
                 return "[ERREUR] Réponse trop courte ou vide."
 
-            self.save_to_memory(prompt, answer)
+            if should_save:
+                self.save_to_memory(cleaned_prompt, answer)
+
             return answer
         except Exception as e:
             return f"[ERREUR] Erreur génération : {str(e)}"
+
 
 
 
