@@ -222,9 +222,9 @@ class MainWindow(QWidget):
         self.language_selector.addItems(["Python", "JavaScript", "C++", "HTML", "SQL"])
         control_layout.addWidget(self.language_selector)
 
-        self.force_code_button = QPushButton("Tester Code Vocal")
-        self.force_code_button.clicked.connect(lambda: self.on_text_recognized("alice crée un code python pour afficher l'heure"))
-        control_layout.addWidget(self.force_code_button)
+        self.image_manager_button = QPushButton("Images")
+        self.image_manager_button.clicked.connect(self.open_image_manager)
+        control_layout.addWidget(self.image_manager_button)
 
         control_layout.addWidget(self.voice_checkbox)
         control_layout.addWidget(self.memory_button)
@@ -453,3 +453,9 @@ class MainWindow(QWidget):
         cursor.select(QTextCursor.Document)
         pyperclip.copy(cursor.selectedText())
         QMessageBox.information(self, "Copié", "Code copié dans le presse-papiers.")
+
+    def open_image_manager(self):
+        from gui.image_manager import ImageManager
+        self.image_window = ImageManager(style_sheet=self.styleSheet())
+        self.image_window.show()
+
