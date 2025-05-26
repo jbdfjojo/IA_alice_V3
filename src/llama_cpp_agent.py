@@ -6,6 +6,13 @@ from llama_cpp import Llama
 from db.mysql_manager import MySQLManager
 import uuid
 from agent import generate 
+from agent.generate import generate_image  # ✅ Import nécessaire
+import os
+import threading
+from datetime import datetime
+from diffusers import StableDiffusionPipeline
+import torch_directml
+
 
 class LlamaCppAgent:
     def __init__(self, model_paths: dict, selected_model="Mistral-7B-Instruct"):
@@ -122,16 +129,30 @@ class LlamaCppAgent:
 
     def generate_image(self, prompt: str) -> str:
         try:
-            # Génère un nom d'image unique
-            filename = f"images/generated_{uuid.uuid4().hex[:8]}.png"
-            generate.generate_image(prompt, filename)
+            print("[INFO] Lancement de la génération via subprocess")
+            script_path = os.path.abspath("src/agent/generate.py")
 
-            if os.path.exists(filename):
-                return f"[Image générée] #image {filename}"
-            else:
-                return "[ERREUR] L'image n'a pas pu être générée."
+            output = subprocess.check_output(
+                ["python", script_path, "--prompt", prompt],
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=60
+            )
+
+            print("[DEBUG] Sortie subprocess :", output)
+
+            for line in output.splitlines():
+                if "#image" in line:
+                    return line.strip()
+
+            return "[ERREUR] Aucune image générée."
+
+        except subprocess.TimeoutExpired:
+            return "[ERREUR] Timeout de génération."
+        except subprocess.CalledProcessError as e:
+            return f"[ERREUR] Génération échouée : {e.output}"
         except Exception as e:
-            return f"[ERREUR] Exception lors de la génération de l'image : {e}"
+            return f"[ERREUR] Exception : {str(e)}"
 
 
     def save_to_memory(self, prompt: str, response: str):

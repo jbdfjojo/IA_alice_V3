@@ -7,25 +7,20 @@ import pyperclip
 import re
 from html import escape
 
-# PyQt5 - Core
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot
-
-# PyQt5 - Widgets
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel,
-    QCheckBox, QComboBox, QScrollArea, QApplication, QMessageBox
+    QCheckBox, QComboBox, QMessageBox, QScrollArea, QApplication
 )
-
-# PyQt5 - GUI
 from PyQt5.QtGui import QPixmap, QTextCursor
 
-# Pygments pour coloration syntaxique
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
 from pygments.formatters import HtmlFormatter
 
-# Agent IA
 from llama_cpp_agent import LlamaCppAgent
+
+from diffusers import StableDiffusionPipeline
 
 class VoiceRecognitionThread(QThread):
     result_signal = pyqtSignal(str)
@@ -41,10 +36,6 @@ class VoiceRecognitionThread(QThread):
         self.microphone = sr.Microphone(device_index=1)
         self.last_active_time = time.time()
         self.max_inactive_duration = 30
-
-        print("Microphones disponibles :")
-        for i, name in enumerate(sr.Microphone.list_microphone_names()):
-            print(f"{i}: {name}")
 
     def run(self):
         with self.microphone as source:
@@ -63,17 +54,13 @@ class VoiceRecognitionThread(QThread):
                     continue
 
                 try:
-                    print("🎤 En écoute...")
                     audio = self.recognizer.listen(source, timeout=10)
 
                     if self.is_paused:
-                        print("🔇 Micro désactivé pendant l'écoute. Abandon du traitement.")
                         continue
 
-                    print("🔊 Traitement audio...")
                     text = self.recognizer.recognize_google(audio, language="fr-FR").lower()
                     self.last_active_time = time.time()
-                    print(f"[DEBUG] Texte reconnu brut : '{text}'")
 
                     if "alice" in text:
                         cleaned_text = text.split("alice", 1)[-1].strip()
@@ -104,7 +91,6 @@ class RunnableFunc(QRunnable):
         self.func = func
 
     def run(self):
-        print("[DEBUG] RunnableFunc lancé")
         self.func()
 
 
@@ -116,6 +102,7 @@ def load_config():
             except json.JSONDecodeError:
                 pass
     return {}
+
 
 def save_config(config):
     with open("config.json", "w") as file:
@@ -191,20 +178,6 @@ class MainWindow(QWidget):
         self.input_box.setPlaceholderText("Entrez votre message ici...")
         layout.addWidget(self.input_box)
 
-        # 📸 Label pour afficher l’image générée
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("padding: 10px; background-color: #1e1e1e; border-radius: 8px;")
-        self.image_label.setVisible(False)  # Par défaut cachée
-
-        # 📜 Scroll si image trop grande
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setWidget(self.image_label)
-        self.scroll_area.setVisible(False)
-
-        layout.addWidget(self.scroll_area)
-
         button_layout = QHBoxLayout()
         self.send_button = QPushButton("Envoyer")
         self.send_button.clicked.connect(self.send_prompt)
@@ -254,13 +227,10 @@ class MainWindow(QWidget):
             text_lower = text.lower()
 
             if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
-                print("[DEBUG] Appel à generate_image_from_text()")
                 self.generate_image_from_text(text)
             elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
-                print("[DEBUG] Appel à generate_code_from_text()")
                 self.generate_code_from_text(text)
             else:
-                print("[DEBUG] Appel à generate_model_response()")
                 self.generate_model_response(text)
 
     def generate_code_from_text(self, text):
@@ -273,8 +243,12 @@ class MainWindow(QWidget):
             language = self.language_selector.currentText()
             code_response = self.agent.generate_code(text, language=language)
             print("[DEBUG] Code brut retourné :", repr(code_response))
-            match = re.search(r"```(?:\\w+)?\\s*(.*?)```", code_response, re.DOTALL)
-            extracted_code = match.group(1).strip() if match else code_response.strip()
+
+            match = re.search(r"```(?:\w+)?\s*(.*?)```", code_response, re.DOTALL)
+            if match:
+                extracted_code = match.group(1).strip()
+            else:
+                extracted_code = code_response.strip()
 
             try:
                 lexer = get_lexer_by_name(language.lower(), stripall=True)
@@ -284,13 +258,18 @@ class MainWindow(QWidget):
             formatter = HtmlFormatter(style="monokai", noclasses=True)
             highlighted = highlight(extracted_code, lexer, formatter)
 
-            html_block = f'<div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;">{highlighted}</div>'
-            self.response_box.append("<b>[Alice]</b> Voici le code généré :<br>")
+            html_block = f'''
+            <div style="background-color: #1e1e1e; color: #ffffff; padding: 10px; border-radius: 8px; margin: 10px 0; font-family: monospace;">
+            {highlighted}
+            </div>
+            '''
+            self.response_box.append("<b>[Alice]</b> Voici le code généré :")
             self.response_box.append(html_block)
-            self.response_box.append('<div style="background-color: transparent; color: black; margin: 10px 0;">—</div>')
+            self.response_box.append('<div style="all: unset; margin-top: 10px;"></div>')  # ← reset style
 
             if self.voice_checkbox.isChecked():
                 self.agent.speak("Voici le code généré.")
+
             self.voice_recognition_thread.resume()
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
@@ -307,30 +286,36 @@ class MainWindow(QWidget):
             image_path = result.split("#image")[-1].strip() if "#image" in result else None
             print("[DEBUG] >>> resultat chemin image_path :", image_path)
 
-            # Stocke temporairement le chemin d’image
-            self._last_generated_image = image_path
-
-            # Appelle le slot d'affichage depuis le thread principal
-            self.display_generated_image(image_path)
+            self.image_path_result = image_path  # Stocke dans l'instance
+            QTimer.singleShot(0, self.display_generated_image)  # Appel Qt-thread safe
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
-    @pyqtSlot()
-    def display_generated_image(self, image_path):
-        full_path = os.path.abspath(image_path)
-        pixmap = QPixmap(full_path)
-        print(f"[DEBUG] Chargement pixmap depuis : {full_path} | Null ? {pixmap.isNull()}")
 
-        if not pixmap.isNull():
-            img_html = f"""
-            <div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
-                <img src="{full_path.replace(os.sep, '/')}" width="350">
-            </div>
-            """
-            self.response_box.append("<b>[Alice]</b> Voici votre image générée :")
-            self.response_box.append(img_html)
+    def display_generated_image(self):
+        print("[DEBUG] → Entrée dans display_generated_image()")
+        image_path = getattr(self, 'image_path_result', None)
+        if image_path and os.path.exists(image_path):
+            full_path = os.path.abspath(image_path).replace("\\", "/")
+            pixmap = QPixmap(full_path)
+            print(f"[DEBUG] Chargement pixmap depuis : {full_path} | Null ? {pixmap.isNull()}")
+
+            if not pixmap.isNull():
+                img_html = f'''
+                <div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+                    <img src="file:///{full_path}" width="350">
+                </div>
+                '''
+                self.response_box.append("<b>[Alice]</b> Voici votre image générée :")
+                self.response_box.append(img_html)
+            else:
+                self.response_box.append("<b>[Alice]</b> L'image est invalide ou corrompue.")
         else:
-            self.response_box.append("<b>[Alice]</b> Erreur : L'image est invalide.")
+            self.response_box.append("<b>[Alice]</b> Erreur : image introuvable.")
+
+        self.voice_recognition_thread.resume()
+
+
 
     def generate_model_response(self, prompt):
         print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
@@ -340,7 +325,7 @@ class MainWindow(QWidget):
         def run():
             response = self.agent.generate(prompt)
             print("[DEBUG] Réponse brute :", response)
-            self.response_box.append(f"<b>[Alice]</b> {escape(response)}")
+            self.response_box.append(f"<b>[Alice]</b> <span style='color: black;'>{escape(response)}</span>")
             self.waiting_label.setVisible(False)
             if self.voice_checkbox.isChecked():
                 self.agent.speak(response)
@@ -349,19 +334,17 @@ class MainWindow(QWidget):
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
+
     def send_prompt(self):
         text = self.input_box.toPlainText().strip()
         if text:
             self.response_box.append(f"[Vous] {text}")
             text_lower = text.lower()
             if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
-                print("[DEBUG] Appel à generate_image_from_text()")
                 self.generate_image_from_text(text)
             elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
-                print("[DEBUG] Appel à generate_code_from_text()")
                 self.generate_code_from_text(text)
             else:
-                print("[DEBUG] Appel à generate_model_response()")
                 self.generate_model_response(text)
 
     def save_prompt(self):
