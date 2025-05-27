@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel,
     QCheckBox, QComboBox, QMessageBox, QScrollArea, QApplication
 )
-from PyQt5.QtGui import QPixmap, QTextCursor, QPalette, QColor
+from PyQt5.QtGui import QPixmap, QTextCursor, QPalette, QColor, QFont
 
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
@@ -201,40 +201,54 @@ class MainWindow(QWidget):
 
     def setup_ui(self):
         layout = QVBoxLayout()
-        control_layout = QHBoxLayout()
 
-        self.voice_checkbox = QCheckBox("Voix")
-        self.voice_checkbox.stateChanged.connect(self.toggle_voice)
+        # --- Ligne du haut : boutons et sélecteurs ---
+        top_controls = QHBoxLayout()
 
-        self.memory_button = QPushButton("Mémoire")
-        self.memory_button.clicked.connect(self.open_memory_window)
-
+        # 1. Choix modèle
         self.model_selector = QComboBox()
         self.model_selector.addItems(self.model_paths.keys())
         self.model_selector.currentTextChanged.connect(self.load_model)
+        top_controls.addWidget(self.model_selector)
 
+        # 2. Checkbox voix
+        self.voice_checkbox = QCheckBox("Voix")
+        self.voice_checkbox.stateChanged.connect(self.toggle_voice)
+        top_controls.addWidget(self.voice_checkbox)
+
+        # 3. Micro On/Off
         self.voice_button = QPushButton("🎤 Micro: OFF")
         self.voice_button.setCheckable(True)
         self.voice_button.clicked.connect(self.toggle_voice_input)
         self.voice_button.setStyleSheet("background-color: lightcoral; font-weight: bold;")
+        top_controls.addWidget(self.voice_button)
 
+        # 4. Choix du langage
         self.language_selector = QComboBox()
         self.language_selector.addItems(["Python", "JavaScript", "C++", "HTML", "SQL"])
-        control_layout.addWidget(self.language_selector)
+        top_controls.addWidget(self.language_selector)
 
+        # 5. Bouton Images
         self.image_manager_button = QPushButton("Images")
         self.image_manager_button.clicked.connect(self.open_image_manager)
-        control_layout.addWidget(self.image_manager_button)
+        top_controls.addWidget(self.image_manager_button)
 
-        control_layout.addWidget(self.voice_checkbox)
-        control_layout.addWidget(self.memory_button)
-        control_layout.addWidget(self.model_selector)
-        control_layout.addWidget(self.voice_button)
+        # 6. Bouton Mémoire
+        self.memory_button = QPushButton("Mémoire")
+        self.memory_button.clicked.connect(self.open_memory_window)
+        top_controls.addWidget(self.memory_button)
 
-        layout.addLayout(control_layout)
+        # 7. Bouton Sauvegarder
+        self.save_button = QPushButton("Sauvegarder")
+        self.save_button.clicked.connect(self.save_prompt)
+        top_controls.addWidget(self.save_button)
 
+        layout.addLayout(top_controls)
+
+        # --- Milieu : réponse IA (grand champ avec scroll + police Times New Roman 14px) ---
         self.response_box = QTextEdit()
         self.response_box.setReadOnly(True)
+        self.response_box.setFont(QFont("Times New Roman", 14))
         layout.addWidget(self.response_box)
 
         self.waiting_label = QLabel("Alice réfléchit...")
@@ -242,20 +256,23 @@ class MainWindow(QWidget):
         self.waiting_label.setVisible(False)
         layout.addWidget(self.waiting_label)
 
+        # --- Bas : champ utilisateur réduit + bouton Envoyer ---
+        bottom_layout = QHBoxLayout()
+
         self.input_box = QTextEdit()
         self.input_box.setPlaceholderText("Entrez votre message ici...")
-        layout.addWidget(self.input_box)
+        self.input_box.setFont(QFont("Times New Roman", 14))
+        self.input_box.setFixedHeight(self.height() // 6)  # ~1/3 de la zone réponse
+        bottom_layout.addWidget(self.input_box)
 
-        button_layout = QHBoxLayout()
         self.send_button = QPushButton("Envoyer")
         self.send_button.clicked.connect(self.send_prompt)
-        self.save_button = QPushButton("Sauvegarder")
-        self.save_button.clicked.connect(self.save_prompt)
-        button_layout.addWidget(self.send_button)
-        button_layout.addWidget(self.save_button)
+        self.send_button.setFixedHeight(40)
+        bottom_layout.addWidget(self.send_button)
 
-        layout.addLayout(button_layout)
+        layout.addLayout(bottom_layout)
 
+        # --- Appliquer le layout final ---
         self.setLayout(layout)
 
     def toggle_voice(self, state):
