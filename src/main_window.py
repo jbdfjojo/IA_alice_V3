@@ -7,12 +7,12 @@ import pyperclip
 import re
 from html import escape
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot, QSize
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel,
     QCheckBox, QComboBox, QMessageBox, QScrollArea, QApplication
 )
-from PyQt5.QtGui import QPixmap, QTextCursor, QPalette, QColor, QFont
+from PyQt5.QtGui import QPixmap, QTextCursor, QPalette, QColor, QFont, QMovie
 
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
@@ -29,7 +29,18 @@ try:
 except Exception as e:
     print(f"Warning qRegisterMetaType QTextCursor skipped: {e}")
 
+class InputTextEdit(QTextEdit):
+    def __init__(self, parent=None, submit_callback=None):
+        super().__init__(parent)
+        self.submit_callback = submit_callback
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Return and not event.modifiers() & Qt.ShiftModifier:
+            if self.submit_callback:
+                self.submit_callback()
+            event.accept()  # empêche le retour à la ligne
+        else:
+            super().keyPressEvent(event)
 class VoiceRecognitionThread(QThread):
     result_signal = pyqtSignal(str)
 
@@ -251,15 +262,38 @@ class MainWindow(QWidget):
         self.response_box.setFont(QFont("Times New Roman", 14))
         layout.addWidget(self.response_box)
 
+        # --- Zone d'attente centrée avec spinner + texte ---
+        self.waiting_container = QWidget()
+        self.waiting_container.setVisible(False)
+        waiting_layout = QHBoxLayout(self.waiting_container)
+        waiting_layout.setAlignment(Qt.AlignCenter)
+
+        # Spinner GIF
+        self.spinner_label = QLabel()
+        self.spinner_movie = QMovie("assets/spinner_2.gif")
+        self.spinner_movie.setScaledSize(QSize(24, 24))  # 🔹 Taille réduite du spinner
+        if not self.spinner_movie.isValid():
+            print("❌ Le fichier spinner_2.gif est introuvable ou invalide.")
+        else:
+            self.spinner_label.setMovie(self.spinner_movie)
+        self.spinner_label.setVisible(True)
+
+        # Texte à côté du spinner
         self.waiting_label = QLabel("Alice réfléchit...")
-        self.waiting_label.setAlignment(Qt.AlignCenter)
-        self.waiting_label.setVisible(False)
-        layout.addWidget(self.waiting_label)
+        self.waiting_label.setStyleSheet("font-style: italic; font-size: 14px;")
+        self.waiting_label.setAlignment(Qt.AlignLeft)
+
+        # Ajouter les deux côte à côte
+        waiting_layout.addWidget(self.spinner_label)
+        waiting_layout.addWidget(self.waiting_label)
+
+        layout.addWidget(self.waiting_container)
+
 
         # --- Bas : champ utilisateur réduit + bouton Envoyer ---
         bottom_layout = QHBoxLayout()
 
-        self.input_box = QTextEdit()
+        self.input_box = InputTextEdit(submit_callback=self.send_prompt)
         self.input_box.setPlaceholderText("Entrez votre message ici...")
         self.input_box.setFont(QFont("Times New Roman", 14))
         self.input_box.setFixedHeight(self.height() // 6)  # ~1/3 de la zone réponse
@@ -320,6 +354,10 @@ class MainWindow(QWidget):
                 self.generate_model_response(text)
 
     def generate_code_from_text(self, text):
+        self.set_waiting_message("Alice réfléchit...")
+        self.spinner_label.setVisible(True)
+        self.spinner_movie.start()
+        self.waiting_label.setVisible(True)
         print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
         self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
         self.response_box.append("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️")
@@ -327,6 +365,7 @@ class MainWindow(QWidget):
 
         def run():
             print("[DEBUG] → Début du thread de génération de code")
+            self.set_waiting_message("Alice réfléchit...")
             language = self.language_selector.currentText()
             code_response = self.agent.generate_code(text, language=language)
             print("[DEBUG] Code brut retourné :", repr(code_response))
@@ -341,6 +380,10 @@ class MainWindow(QWidget):
 
             formatter = HtmlFormatter(style="monokai", noclasses=True)
             highlighted = highlight(extracted_code, lexer, formatter)
+
+            self.clear_waiting_message()
+            self.spinner_movie.stop()
+            self.spinner_label.setVisible(False)
 
             # Mise à jour de l'interface via invokeMethod
             QMetaObject.invokeMethod(self, "append_code_block", Qt.QueuedConnection, Q_ARG(str, highlighted))
@@ -373,6 +416,10 @@ class MainWindow(QWidget):
 
 
     def generate_image_from_text(self, text):
+        self.set_waiting_message("Alice réfléchit...")
+        self.spinner_label.setVisible(True)
+        self.spinner_movie.start()
+        self.waiting_label.setVisible(True)
         self.response_box.append(f"<b>[Vous]</b> {text}")
         self.response_box.append("<b>[Alice]</b> Je vais générer une image... Veuillez patienter ⏳")
         QApplication.processEvents()
@@ -388,12 +435,16 @@ class MainWindow(QWidget):
             print("→ Chemin absolu :", os.path.abspath(image_path))
 
             self.image_path_result = image_path  # Stocke dans l'instance
+            self.clear_waiting_message()
+            self.spinner_movie.stop()
+            self.spinner_label.setVisible(False)
             QTimer.singleShot(0, self.display_generated_image)  # Appel Qt-thread safe
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
 
     def display_generated_image(self):
+        
         print("[DEBUG] → Entrée dans display_generated_image()")
         image_path = getattr(self, 'image_path_result', None)
         if image_path and os.path.exists(image_path):
@@ -413,18 +464,21 @@ class MainWindow(QWidget):
                 self.response_box.append("<b>[Alice]</b> L'image est invalide ou corrompue.")
         else:
             self.response_box.append("<b>[Alice]</b> Erreur : image introuvable.")
-
         self.voice_recognition_thread.resume()
 
-
-
     def generate_model_response(self, prompt):
+        self.set_waiting_message("Alice réfléchit...")
+        self.spinner_label.setVisible(True)
+        self.spinner_movie.start()
         print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
         self.waiting_label.setVisible(True)
         QApplication.processEvents()
 
         def run():
             response = self.agent.generate(prompt)
+            self.clear_waiting_message()
+            self.spinner_movie.stop()
+            self.spinner_label.setVisible(False)
             print("[DEBUG] Réponse brute :", response)
             self.response_box.append(f"<b>[Alice]</b> <span style='color: white;'>{escape(response)}</span>")
             self.waiting_label.setVisible(False)
@@ -447,6 +501,8 @@ class MainWindow(QWidget):
                 self.generate_code_from_text(text)
             else:
                 self.generate_model_response(text)
+
+        self.input_box.clear()
 
     def save_prompt(self):
         prompt = self.input_box.toPlainText().strip()
@@ -475,4 +531,14 @@ class MainWindow(QWidget):
         from gui.image_manager import ImageManager
         self.image_window = ImageManager(style_sheet=self.styleSheet())
         self.image_window.show()
+
+    def set_waiting_message(self, message: str):
+        self.waiting_label.setText(message)
+        self.spinner_movie.start()
+        self.waiting_container.setVisible(True)
+        QApplication.processEvents()
+
+    def clear_waiting_message(self):
+        self.spinner_movie.stop()
+        self.waiting_container.setVisible(False)
 
