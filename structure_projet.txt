@@ -2,7 +2,6 @@ bonjour je souhaiterai que tu m'aide a corriger les erreurs et améliorer un pro
 je te donne la structure du projet et je souhaite garder les fonctionnalité ( génération de code, génération d'image, quel parle, que je puisse écrire en parlant et la mémoire qui passe par MySQL).
 j'utilise deux model donc je souhaite garder la box pour changer quand je le souhaite.
 le chemin de mon projet est : C:\Users\Blazufr\Desktop\IA_alice_V3.
-je souhaite te joins la structure du projet et les fichier suivant : app.py, main_window.py et llama_cpp_agent.py
   
 
 asset
@@ -40,225 +39,651 @@ src/gui/voice_thread.py
 src/utils/database_handler.py
 src/utils/logger.py
 
-
-APP.py :
-
-import sys
-import json
-from PyQt5.QtWidgets import QApplication
-from llama_cpp_agent import LlamaCppAgent
-from main_window import MainWindow
-
-# Définir les chemins des modèles
-model_paths = {
-    "Mistral-7B-Instruct": "C:/Users/Blazufr/Desktop/IA_alice_V3/model/mistral-7b-instruct-v0.2.Q8_0.gguf",
-    "Nous-Hermes-2-Mixtral": "C:/Users/Blazufr/Desktop/IA_alice_V3/model/nous-hermes-llama2-13b.Q8_0.gguf"
-}
-
-# Charger la configuration
-try:
-    with open("config.json", "r") as f:
-        config = json.load(f)
-except FileNotFoundError:
-    raise FileNotFoundError("Fichier config.json introuvable.")
-
-# Récupérer le dernier modèle utilisé
-last_model = config.get("last_model", "Mistral-7B-Instruct")
-
-# Vérifier que le modèle sélectionné est valide
-if last_model not in model_paths:
-    raise ValueError(f"Le modèle sélectionné '{last_model}' est invalide dans la configuration.")
-
-# Récupérer le chemin du modèle sélectionné
-selected_model_path = model_paths[last_model]
-selected_model = "Mistral-7B-Instruct"
-# Créer l'agent avec le modèle sélectionné
-agent = LlamaCppAgent(model_paths=model_paths, selected_model=selected_model) # Passer uniquement le chemin du modèle sélectionné
-
-# Lancer l'application
-app = QApplication(sys.argv)
-window = MainWindow(model_paths)  # Passer les chemins des modèles à la fenêtre
-window.show()
-sys.exit(app.exec_())
-
-
-
-llama_cpp_agent.py : 
 import os
-import pyttsx3
-from llama_cpp import Llama
-from db.mysql_manager import MySQLManager
-import subprocess
-from PyQt5.QtCore import QThread, pyqtSignal
 import json
+import time
+import pyttsx3
+import speech_recognition as sr
+import pyperclip
+import re
+from html import escape
 
-class LlamaThread(QThread):
-    response_ready = pyqtSignal(str, str)  # Signal avec deux arguments
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot, QSize
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel,
+    QCheckBox, QComboBox, QMessageBox, QScrollArea, QApplication
+)
+from PyQt5.QtGui import QPixmap, QTextCursor, QPalette, QColor, QFont, QMovie
 
-    def __init__(self, agent, prompt):
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name
+from pygments.formatters import HtmlFormatter
+
+from llama_cpp_agent import LlamaCppAgent
+
+from diffusers import StableDiffusionPipeline
+
+try:
+    from PyQt5.QtCore import qRegisterMetaType
+    from PyQt5.QtGui import QTextCursor
+    qRegisterMetaType(QTextCursor, "QTextCursor")
+except Exception as e:
+    print(f"Warning qRegisterMetaType QTextCursor skipped: {e}")
+
+# Ajout d'une méthode utilitaire pour créer un QLabel stylé
+class StyledLabel(QLabel):
+    def __init__(self, html):
+        super().__init__(html)
+        self.setWordWrap(True)
+        self.setStyleSheet("margin-top: 2px; margin-bottom: 2px; line-height: 1.2em; padding: 0;")
+
+class InputTextEdit(QTextEdit):
+    def __init__(self, parent=None, submit_callback=None):
+        super().__init__(parent)
+        self.submit_callback = submit_callback
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Return and not event.modifiers() & Qt.ShiftModifier:
+            if self.submit_callback:
+                self.submit_callback()
+            event.accept()  # empêche le retour à la ligne
+        else:
+            super().keyPressEvent(event)
+class VoiceRecognitionThread(QThread):
+    result_signal = pyqtSignal(str)
+
+    def __init__(self, agent):
         super().__init__()
         self.agent = agent
-        self.prompt = prompt
+        self.running = True
+        self.is_paused = False
+        self.is_processing_response = False
+        self.mutex = QMutex()
+        self.recognizer = sr.Recognizer()
+        self.microphone = sr.Microphone(device_index=1)
+        self.last_active_time = time.time()
+        self.max_inactive_duration = 30
 
     def run(self):
-        try:
-            if self.prompt.strip():
-                response = self.agent.generate(self.prompt)
-                self.response_ready.emit(self.prompt, response)
-            else:
-                self.response_ready.emit(self.prompt, "Aucune entrée valide détectée.")
-        except Exception as e:
-            self.response_ready.emit(self.prompt, f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}")
+        with self.microphone as source:
+            self.recognizer.adjust_for_ambient_noise(source, duration=1)
+            while self.running:
+                self.mutex.lock()
+                paused = self.is_paused
+                self.mutex.unlock()
 
-class LlamaCppAgent:
-    def __init__(self, model_paths: dict, selected_model="Mistral-7B-Instruct"):
-        model_path = model_paths.get(selected_model)
-        if not model_path:
-            raise ValueError(f"Modèle '{selected_model}' non trouvé dans les chemins fournis.")
+                if paused:
+                    time.sleep(0.5)
+                    continue
 
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Modèle introuvable : {model_path}")
+                if time.time() - self.last_active_time > self.max_inactive_duration:
+                    self.pause()
+                    continue
 
-        self.model_path = model_path
-        self.speech_enabled = True
-        self.engine = pyttsx3.init()
+                try:
+                    audio = self.recognizer.listen(source, timeout=10)
 
-        print(f"[INFO] Chargement du modèle depuis : {model_path}")
+                    if self.is_paused:
+                        continue
 
-        try:
-            self.model = Llama(
-                model_path=self.model_path,
-                n_ctx=1024,
-                n_threads=6,
-                n_gpu_layers=0,
-                seed=42,
-                verbose=True
-            )
-        except Exception as e:
-            print(f"[ERREUR] Échec lors du chargement du modèle : {e}")
-            self.model = None
+                    text = self.recognizer.recognize_google(audio, language="fr-FR").lower()
+                    self.last_active_time = time.time()
 
-        self.db_manager = MySQLManager("localhost", "root", "JOJOJOJO88", "ia_alice")
-        self.first_interaction = True
+                    if "alice" in text:
+                        cleaned_text = text.split("alice", 1)[-1].strip()
+                        if cleaned_text:
+                            self.is_processing_response = True
+                            self.result_signal.emit(cleaned_text)
+                except:
+                    pass
+                finally:
+                    self.is_processing_response = False
 
-    def set_speech_enabled(self, enabled: bool):
-        self.speech_enabled = enabled
+    def pause(self):
+        self.is_paused = True
 
-    def process_voice_input(self, voice_input: str):
-        """ Fonction pour traiter l'entrée vocale et générer une réponse """
-        print(f"[VOICE INPUT] Texte reçu : {voice_input}")
+    def resume(self):
+        self.is_paused = False
+        self.last_active_time = time.time()
 
-        # Filtrage des erreurs d'entrée audio
-        if "timeout" in voice_input.lower() or "audio incompréhensible" in voice_input.lower():
-            return "[ERREUR] Entrée audio invalide."
+    def stop(self):
+        self.running = False
+        self.quit()
+        self.wait()
 
-        # Si l'entrée est vide ou composée uniquement de blancs
-        if not voice_input.strip():
-            return "[ERREUR] Aucune entrée valide détectée."
 
-        response = self.generate(voice_input)  # Appel à la génération du modèle
-        return response
+class RunnableFunc(QRunnable):
+    def __init__(self, func):
+        super().__init__()
+        self.func = func
 
-    def generate(self, prompt: str) -> str:
-        """ Fonction pour générer une réponse avec le modèle """
-        try:
-            prompt = prompt.strip()
+    def run(self):
+        self.func()
 
-            # Vérification d'une entrée vide
-            if not prompt:
-                return "[ERREUR] Aucune entrée valide."
 
-            # Génération de la réponse par le modèle
-            response = self.model.create_completion(
-                prompt=f"Vous : {prompt}\nAlice :",
-                max_tokens=200,
-                temperature=0.7,
-                top_p=0.9,
-                stop=["\nVous:", "\nAlice:", "\n"]
-            )
+def load_config():
+    if os.path.exists("config.json"):
+        with open("config.json", "r") as file:
+            try:
+                return json.load(file)
+            except json.JSONDecodeError:
+                pass
+    return {}
 
-            # Débogage : afficher la réponse brute pour vérifier son contenu
-            print(f"Réponse brute : {response}")
 
-            # Extraire le texte de la réponse JSON
-            if isinstance(response, dict) and "choices" in response:
-                choices = response["choices"]
-                if len(choices) > 0:
-                    answer = choices[0]["text"].strip()
-                else:
-                    answer = "[ERREUR] Le modèle n'a pas généré de texte."
-            else:
-                answer = "[ERREUR] Réponse non valide reçue du modèle."
+def save_config(config):
+    with open("config.json", "w") as file:
+        json.dump(config, file, indent=4)
 
-            # Filtrage des réponses vides ou non pertinentes
-            if not answer or len(answer.split()) < 2:  # Minimum de 2 mots
-                return "[ERREUR] Modèle n'a pas répondu de manière compréhensible."
 
-            # Sauvegarder la réponse et la renvoyer
-            self.save_to_memory(prompt, answer)
-            return answer
+class MainWindow(QWidget):
+    def __init__(self, model_paths: dict, agent):
+        super().__init__()
+        self.setWindowTitle("Alice - Interface IA")
+        self.setGeometry(100, 100, 800, 600)
 
-        except Exception as e:
-            # Gérer les erreurs de génération
-            return f"[ERREUR] [AGENT] Erreur lors de la génération : {str(e)}"
+        self.model_paths = model_paths
+        self.agent = agent
+        self.config = load_config()
 
-    def generate_image(self, prompt: str) -> str:
-        """ Fonction pour générer une image à partir d'un prompt """
-        try:
-            description = prompt.lower().split("image", 1)[-1].strip()
-            if not description:
-                return "[ERREUR] Veuillez décrire l'image après le mot-clé 'image'."
+        self.voice_input_enabled = False
+        self.voice_recognition_thread = VoiceRecognitionThread(self.agent)
+        self.voice_recognition_thread.result_signal.connect(self.on_text_recognized)
+        self.is_user_speaking = True
 
-            model_path = "C:/Users/Blazufr/Desktop/IA_alice_V3/src/agent"
-            output_path = "images/generated_image.png"
+        self.setup_ui()
+        self.apply_dark_theme()
 
-            result = subprocess.run(
-                ["python", os.path.join(model_path, "generate.py"),
-                 "--prompt", description,
-                 "--output", output_path],
-                capture_output=True,
-                text=True
-            )
+        last_model = self.config.get("last_model", "Mistral-7B-Instruct")
+        index = self.model_selector.findText(last_model)
+        self.model_selector.setCurrentIndex(index if index != -1 else 0)
+        self.voice_checkbox.setChecked(self.config.get("voice_enabled", True))
 
-            if result.returncode != 0:
-                print(f"[ERREUR IMAGE] {result.stderr}")
-                return "[ERREUR] Échec lors de la génération de l'image."
+    def apply_dark_theme(self):
+        dark_palette = QPalette()
+        dark_palette.setColor(QPalette.Window, QColor(30, 30, 30))
+        dark_palette.setColor(QPalette.WindowText, Qt.white)
+        dark_palette.setColor(QPalette.Base, QColor(25, 25, 25))
+        dark_palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+        dark_palette.setColor(QPalette.ToolTipBase, Qt.white)
+        dark_palette.setColor(QPalette.ToolTipText, Qt.white)
+        dark_palette.setColor(QPalette.Text, Qt.white)
+        dark_palette.setColor(QPalette.Button, QColor(53, 53, 53))
+        dark_palette.setColor(QPalette.ButtonText, Qt.white)
+        dark_palette.setColor(QPalette.BrightText, Qt.red)
+        dark_palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+        dark_palette.setColor(QPalette.HighlightedText, Qt.black)
 
-            return f"#image {output_path}"
+        self.setPalette(dark_palette)
+        QApplication.setPalette(dark_palette)
 
-        except Exception as e:
-            return f"[ERREUR] Exception lors de la génération de l'image : {str(e)}"
+        self.setStyleSheet("""
+            QWidget {
+                        background-color: #121212;
+                        color: #f0f0f0;
+                        font-family: Consolas, monospace;
+                        font-size: 14px;
+                    }
+                    QScrollArea {
+                        background-color: #121212;
+                    }
+                    QTextEdit {
+                        background-color: #1e1e1e;
+                        color: #f0f0f0;
+                        border: 1px solid #333;
+                        border-radius: 5px;
+                        padding: 6px;
+                    }
+                    QPushButton {
+                        background-color: #2d2d2d;
+                        color: white;
+                        border: 1px solid #444;
+                        padding: 6px;
+                        border-radius: 6px;
+                    }
+                    QPushButton:hover {
+                        background-color: #3a3a3a;
+                    }
+                    QLabel {
+                        color: #f0f0f0;
+                    }
+                    QComboBox {
+                        background-color: #1e1e1e;
+                        color: #f0f0f0;
+                        border: 1px solid #333;
+                        padding: 4px;
+                    }
+                    QCheckBox {
+                        color: #f0f0f0;
+                    }
+                """)
 
-    def speak(self, text: str):
-        """ Fonction pour effectuer la synthèse vocale """
-        try:
-            if self.speech_enabled:
-                self.engine.say(text)
-                self.engine.runAndWait()
-        except Exception as e:
-            print(f"[ERREUR VOCALE] {e}")
+    def setup_ui(self):
+        layout = QVBoxLayout()
 
-    def save_to_memory(self, prompt: str, response: str):
-        """ Fonction pour sauvegarder l'interaction dans la mémoire """
-        try:
-            self.db_manager.save_memory(prompt, response)
-        except Exception as e:
-            print(f"[ERREUR MÉMOIRE] {e}")
+        # --- Ligne du haut : boutons et sélecteurs ---
+        top_controls = QHBoxLayout()
 
-    def is_important(self, prompt: str, response: str) -> bool:
-        """ Détermine si l'interaction doit être sauvegardée en fonction de son importance """
-        return len(prompt) >= 15
+        # 1. Choix modèle  
+        self.model_selector = QComboBox()
+        self.model_selector.addItems(self.model_paths.keys())
+        self.model_selector.currentTextChanged.connect(self.load_model)
+        top_controls.addWidget(self.model_selector)
 
-    def save_interaction(self):
-        """ Fonction pour sauvegarder une interaction dans la mémoire """
-        prompt = self.text_input.toPlainText()
-        if prompt.strip():
-            self.save_to_memory(prompt, "Réponse sauvegardée sans génération.")
-            self.display_message("L'interaction a été sauvegardée.")
+        # 2. Checkbox voix  
+        self.voice_checkbox = QCheckBox("Voix")
+        self.voice_checkbox.stateChanged.connect(self.toggle_voice)
+        top_controls.addWidget(self.voice_checkbox)
+
+        # 3. Micro On/Off  
+        self.voice_button = QPushButton("🎤 Micro: OFF")
+        self.voice_button.setCheckable(True)
+        self.voice_button.clicked.connect(self.toggle_voice_input)
+        self.voice_button.setStyleSheet("background-color: lightcoral; font-weight: bold;")
+        top_controls.addWidget(self.voice_button)
+
+        # 4. Choix du langage  
+        self.language_selector = QComboBox()
+        self.language_selector.addItems(["Python", "JavaScript", "C++", "HTML", "SQL"])
+        top_controls.addWidget(self.language_selector)
+
+        # 5. Bouton Images  
+        self.image_manager_button = QPushButton("Images")
+        self.image_manager_button.clicked.connect(self.open_image_manager)
+        top_controls.addWidget(self.image_manager_button)
+
+        # 6. Bouton Mémoire  
+        self.memory_button = QPushButton("Mémoire")
+        self.memory_button.clicked.connect(self.open_memory_window)
+        top_controls.addWidget(self.memory_button)
+
+        # 7. Bouton Sauvegarder  
+        self.save_button = QPushButton("Sauvegarder")
+        self.save_button.clicked.connect(self.save_prompt)
+        top_controls.addWidget(self.save_button)
+
+        layout.addLayout(top_controls)
+
+        # --- Milieu : réponse IA (grand champ avec scroll + police Times New Roman 14px) ---
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_widget = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        
+        self.scroll_layout.setAlignment(Qt.AlignTop)  # 🔥 ANCRAGE EN HAUT  
+        self.scroll_layout.setSpacing(0)               # Pas d'espace entre les éléments  
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)  # Pas de marges
+        
+        self.scroll_area.setWidget(self.scroll_widget)
+        self.scroll_area.setFont(QFont("Times New Roman", 14))
+        
+        layout.addWidget(self.scroll_area)
+
+        # --- Zone d'attente centrée avec spinner + texte ---
+        self.waiting_container = QWidget()
+        self.waiting_container.setVisible(False)
+        waiting_layout = QHBoxLayout(self.waiting_container)
+        waiting_layout.setAlignment(Qt.AlignCenter)
+
+        # Spinner GIF  
+        self.spinner_label = QLabel()
+        self.spinner_movie = QMovie("assets/spinner_2.gif")
+        self.spinner_movie.setScaledSize(QSize(24, 24))  # 🔹 Taille réduite du spinner  
+        if not self.spinner_movie.isValid():
+            print("❌ Le fichier spinner_2.gif est introuvable ou invalide.")
         else:
-            self.display_message("Aucune interaction à sauvegarder.")
+            self.spinner_label.setMovie(self.spinner_movie)
+        self.spinner_label.setVisible(True)
 
-    def display_message(self, message: str):
-        """ Affiche un message à l'écran """
-        self.output_text.setPlainText(message)
+        # Texte à côté du spinner  
+        self.waiting_label = QLabel("Alice réfléchit...")
+        self.waiting_label.setStyleSheet("font-style: italic; font-size: 14px;")
+        self.waiting_label.setAlignment(Qt.AlignLeft)
+
+        # Ajouter les deux côte à côte  
+        waiting_layout.addWidget(self.spinner_label)
+        waiting_layout.addWidget(self.waiting_label)
+
+        layout.addWidget(self.waiting_container)
+
+        # --- Bas : champ utilisateur réduit + bouton Envoyer ---
+        bottom_layout = QHBoxLayout()
+
+        self.input_box = InputTextEdit(submit_callback=self.send_prompt)
+        self.input_box.setPlaceholderText("Entrez votre message ici...")
+        self.input_box.setFont(QFont("Times New Roman", 14))
+        self.input_box.setFixedHeight(self.height() // 6)  # ~1/3 de la zone réponse  
+        bottom_layout.addWidget(self.input_box)
+
+        self.send_button = QPushButton("Envoyer")
+        self.send_button.clicked.connect(self.send_prompt)
+        self.send_button.setFixedHeight(40)
+        bottom_layout.addWidget(self.send_button)
+
+        layout.addLayout(bottom_layout)
+
+        # --- Appliquer le layout final ---
+        self.setLayout(layout)
+
+    def toggle_voice(self, state):
+        self.config["voice_enabled"] = bool(state)
+        save_config(self.config)
+
+    def toggle_voice_input(self):
+        self.voice_input_enabled = not self.voice_input_enabled
+        if self.voice_input_enabled:
+            self.voice_button.setText("🎤 Micro: ON")
+            self.voice_button.setStyleSheet("background-color: lightgreen; font-weight: bold;")
+            if not self.voice_recognition_thread.isRunning():
+                self.voice_recognition_thread.start()
+            else:
+                self.voice_recognition_thread.resume()
+        else:
+            self.voice_button.setText("🎤 Micro: OFF")
+            self.voice_button.setStyleSheet("background-color: lightcoral; font-weight: bold;")
+            self.voice_recognition_thread.stop()
+
+    def load_model(self, model_name):
+        self.config["last_model"] = model_name
+        save_config(self.config)
+        try:
+            self.agent = LlamaCppAgent(self.model_paths, selected_model=model_name)
+            self.voice_recognition_thread.agent = self.agent
+        except Exception as e:
+            print(f"[ERREUR CHARGEMENT MODÈLE] : {e}")
+
+    def on_text_recognized(self, text):
+        print("[DEBUG] Texte brut reconnu :", text)
+        if self.is_user_speaking:
+            self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
+
+            self.input_box.setText(text)
+            self.is_user_speaking = False
+            self.voice_recognition_thread.pause()
+            text_lower = text.lower()
+
+            if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
+                self.generate_image_from_text(text)
+            elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
+                self.generate_code_from_text(text)
+            else:
+                self.generate_model_response(text)
+
+    def generate_code_from_text(self, text):
+        self.set_waiting_message("Alice réfléchit...")
+        self.spinner_label.setVisible(True)
+        self.spinner_movie.start()
+        self.waiting_label.setVisible(True)
+        print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
+
+        # Affichage utilisateur dans le scroll
+        label = QLabel(f"<b style='color: lightblue'>[Vous]</b> {text}")
+        self.scroll_layout.addWidget(label)
+
+        # Message d'attente
+        label_wait = QLabel("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️")
+        self.scroll_layout.addWidget(label_wait)
+        QApplication.processEvents()
+
+        def run():
+            print("[DEBUG] → Début du thread de génération de code")
+            language = self.language_selector.currentText()
+            code_response = self.agent.generate_code(text, language=language)
+            print("[DEBUG] Code brut retourné :", repr(code_response))
+
+            match = re.search(r"```(?:\w+)?\s*(.*?)```", code_response, re.DOTALL)
+            extracted_code = match.group(1).strip() if match else code_response.strip()
+
+            try:
+                lexer = get_lexer_by_name(language.lower(), stripall=True)
+            except Exception:
+                lexer = get_lexer_by_name("text", stripall=True)
+
+            formatter = HtmlFormatter(style="monokai", noclasses=True)
+            highlighted = highlight(extracted_code, lexer, formatter)
+
+            self.clear_waiting_message()
+            self.spinner_movie.stop()
+            self.spinner_label.setVisible(False)
+
+            # Mise à jour de l'interface (Qt thread-safe)
+            QMetaObject.invokeMethod(self, "append_code_block", Qt.QueuedConnection,
+                                    Q_ARG(str, highlighted),
+                                    Q_ARG(str, extracted_code))
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()))
+
+        QThreadPool.globalInstance().start(RunnableFunc(run))
+
+
+    @pyqtSlot(str, str)
+    def append_code_block(self, highlighted_code, raw_code):
+        title = StyledLabel("<b style='color: lightgreen'>[Alice]</b> Voici le code généré :")
+        self.scroll_layout.addWidget(title)
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)  # Retirer les marges  
+        container_layout.setSpacing(2)  # Espacement réduit  
+        container.setStyleSheet("background-color: #1e1e1e; border-radius: 4px; padding: 0; margin: 0;")
+        
+        # Taille du conteneur réduite  
+        container.setMaximumWidth(450)  # Ajuster la largeur à un maximum plus petit  
+        container.setMinimumHeight(50)    # Hauteur minimale raisonnable  
+        container.setMaximumHeight(200)    # Même hauteur maximale
+
+        code_display = QTextEdit()
+        code_display.setReadOnly(True)
+        code_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        code_display.setStyleSheet("background-color: #1e1e1e; color: white; border: none; padding: 2px; margin: 0;")  
+        code_display.setMinimumHeight(50)   # Hauteur minimum  
+        code_display.setMaximumHeight(150)   # Hauteur maximum  
+        code_display.setMaximumWidth(450)    # Largeur maximale  
+        code_display.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # Barre de défilement verticale seulement si besoin  
+        code_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Pas de barre de défilement horizontale  
+        code_display.setHtml(f"<pre style='font-family: Consolas; font-size: 16px; line-height: 1; margin: 0; padding: 0;'>{highlighted_code}</pre>")
+        
+        container_layout.addWidget(code_display)
+
+        copy_btn = QPushButton("📋 Copier le code")
+        copy_btn.setFixedWidth(160)
+        copy_btn.clicked.connect(lambda: pyperclip.copy(raw_code))
+        copy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                border-radius: 6px;
+                padding: 6px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+        """)
+        
+        container_layout.addWidget(copy_btn, alignment=Qt.AlignRight)
+
+        self.scroll_layout.addWidget(container)
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()
+        ))
+
+        if self.voice_checkbox.isChecked():
+            self.agent.speak("Voici le code généré.")
+        self.voice_recognition_thread.resume()
+
+    def generate_image_from_text(self, text):
+        self.set_waiting_message("Alice réfléchit...")
+        self.spinner_label.setVisible(True)
+        self.spinner_movie.start()
+        self.waiting_label.setVisible(True)
+        label_wait = QLabel("<b>[Alice]</b> Je vais générer une image... Veuillez patienter ⏳")
+        self.scroll_layout.addWidget(label_wait)
+        QApplication.processEvents()
+
+        def run():
+            print("[DEBUG] → Début de run() image")
+            result = self.agent.generate_image(text)
+            print("[DEBUG] >>> resultat chemin generation image :", result)
+            image_path = result.split("#image")[-1].strip() if "#image" in result else None
+            print("[DEBUG] >>> resultat chemin image_path :", image_path)
+
+            print("→ Existe ?", os.path.exists(image_path))
+            print("→ Chemin absolu :", os.path.abspath(image_path))
+
+            self.image_path_result = image_path  # Stocke dans l'instance
+            self.clear_waiting_message()
+            self.spinner_movie.stop()
+            self.spinner_label.setVisible(False)
+            QTimer.singleShot(0, self.display_generated_image)  # Appel Qt-thread safe
+
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()))
+
+        QThreadPool.globalInstance().start(RunnableFunc(run))
+
+
+    def display_generated_image(self):
+        print("[DEBUG] → Entrée dans display_generated_image()")
+        image_path = getattr(self, 'image_path_result', None)
+        if image_path and os.path.exists(image_path):
+            full_path = os.path.abspath(image_path).replace("\\", "/")
+            pixmap = QPixmap(full_path)
+            print(f"[DEBUG] Chargement pixmap depuis : {full_path} | Null ? {pixmap.isNull()}")
+
+            if not pixmap.isNull():
+                label = QLabel("<b>[Alice]</b> Voici votre image générée :")
+                label.setWordWrap(True)
+                label.setStyleSheet("margin-top: 2px; margin-bottom: 2px; line-height: 1.2em;") 
+                self.scroll_layout.addWidget(label)
+
+                img_label = QLabel()
+                img_label.setAlignment(Qt.AlignCenter)
+                img_label.setPixmap(pixmap.scaledToWidth(350, Qt.SmoothTransformation))
+                img_label.setStyleSheet("margin-top: 10px; margin-bottom: 10px;")
+                self.scroll_layout.addWidget(img_label)
+            else:
+                self.scroll_layout.addWidget(QLabel("<b>[Alice]</b> L'image est invalide ou corrompue."))
+        else:
+            self.scroll_layout.addWidget(QLabel("<b>[Alice]</b> Erreur : image introuvable."))
+
+        self.voice_recognition_thread.resume()
+
+    def generate_model_response(self, prompt):
+        self.set_waiting_message("Alice réfléchit...")
+        print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
+
+        def run():
+            response = self.agent.generate(prompt)
+            print("[DEBUG] Réponse brute :", response)
+
+            # Passage au thread principal pour mise à jour UI
+            QMetaObject.invokeMethod(
+                self,
+                "display_model_response",
+                Qt.QueuedConnection,
+                Q_ARG(str, response)
+            )
+
+        QThreadPool.globalInstance().start(RunnableFunc(run))
+
+    @pyqtSlot(str)
+    def display_model_response(self, response):
+        self.clear_waiting_message()
+        self.spinner_movie.stop()
+        self.spinner_label.setVisible(False)
+
+        label = StyledLabel(f"<b style='color: lightgreen'>[Alice]</b> <span style='color: white;'>{escape(response)}</span>")
+        self.scroll_layout.addWidget(label)
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()))
+
+        if self.voice_checkbox.isChecked():
+            self.agent.speak(response)
+
+        self.is_user_speaking = True
+        self.voice_recognition_thread.resume()
+
+
+
+    def send_prompt(self):
+        text = self.input_box.toPlainText().strip()
+        if not text:
+            return
+
+        user_label = StyledLabel(f"<b style='color: lightblue'>[Vous]</b> {escape(text)}")
+        self.scroll_layout.addWidget(user_label)
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()))
+
+        self.input_box.clear()
+
+        text_lower = text.lower()
+        if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
+            self.generate_image_from_text(text)
+        elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
+            self.generate_code_from_text(text)
+        else:
+            self.generate_model_response(text)
+
+
+    def save_prompt(self):
+        prompt = self.input_box.toPlainText().strip()
+        if prompt:
+            self.agent.save_to_memory(prompt, "Interaction sauvegardée manuellement.")
+            self.response_box.append("[✔] Interaction sauvegardée.")
+
+    def open_memory_window(self):
+        from gui.memory_window import MemoryViewer
+        self.mem_window = MemoryViewer(self.agent, style_sheet=self.styleSheet())  # <-- garde une référence
+        self.mem_window.show()
+
+
+
+    def closeEvent(self, event):
+        self.voice_recognition_thread.stop()
+        event.accept()
+
+    def copy_last_code(self):
+        cursor = self.response_box.textCursor()
+        cursor.select(QTextCursor.Document)
+        pyperclip.copy(cursor.selectedText())
+        QMessageBox.information(self, "Copié", "Code copié dans le presse-papiers.")
+
+    def open_image_manager(self):
+        from gui.image_manager import ImageManager
+        self.image_window = ImageManager(style_sheet=self.styleSheet())
+        self.image_window.show()
+
+    def set_waiting_message(self, message: str):
+        self.waiting_label.setText(message)
+        self.spinner_movie.start()
+        self.waiting_container.setVisible(True)
+        QApplication.processEvents()
+
+    def clear_waiting_message(self):
+        self.spinner_movie.stop()
+        self.waiting_container.setVisible(False)
+
+    def add_code_block(self, highlighted_code: str, raw_code: str):
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+
+        code_display = QTextEdit()
+        code_display.setReadOnly(True)
+        code_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        code_display.setHtml(f"""
+            <div style="font-family: Consolas; font-size: 13px; line-height: 1.2em; margin:0; padding:0;">
+                {highlighted_code}
+            </div>
+        """)
+
+        container_layout.addWidget(code_display)
+
+        copy_btn = QPushButton("📋 Copier le code")
+        copy_btn.setFixedWidth(150)
+        copy_btn.clicked.connect(lambda: pyperclip.copy(raw_code))
+        copy_btn.setStyleSheet("margin-top: 5px; margin-bottom: 10px;")
+        container_layout.addWidget(copy_btn, alignment=Qt.AlignCenter)
+
+        self.scroll_layout.addWidget(container)
 

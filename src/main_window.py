@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import psutil 
 import pyttsx3
 import speech_recognition as sr
 import pyperclip
@@ -28,6 +29,13 @@ try:
     qRegisterMetaType(QTextCursor, "QTextCursor")
 except Exception as e:
     print(f"Warning qRegisterMetaType QTextCursor skipped: {e}")
+
+# Ajout d'une méthode utilitaire pour créer un QLabel stylé
+class StyledLabel(QLabel):
+    def __init__(self, html):
+        super().__init__(html)
+        self.setWordWrap(True)
+        self.setStyleSheet("margin-top: 2px; margin-bottom: 2px; line-height: 1.2em; padding: 0;")
 
 class InputTextEdit(QTextEdit):
     def __init__(self, parent=None, submit_callback=None):
@@ -216,40 +224,40 @@ class MainWindow(QWidget):
         # --- Ligne du haut : boutons et sélecteurs ---
         top_controls = QHBoxLayout()
 
-        # 1. Choix modèle
+        # 1. Choix modèle  
         self.model_selector = QComboBox()
         self.model_selector.addItems(self.model_paths.keys())
         self.model_selector.currentTextChanged.connect(self.load_model)
         top_controls.addWidget(self.model_selector)
 
-        # 2. Checkbox voix
+        # 2. Checkbox voix  
         self.voice_checkbox = QCheckBox("Voix")
         self.voice_checkbox.stateChanged.connect(self.toggle_voice)
         top_controls.addWidget(self.voice_checkbox)
 
-        # 3. Micro On/Off
+        # 3. Micro On/Off  
         self.voice_button = QPushButton("🎤 Micro: OFF")
         self.voice_button.setCheckable(True)
         self.voice_button.clicked.connect(self.toggle_voice_input)
         self.voice_button.setStyleSheet("background-color: lightcoral; font-weight: bold;")
         top_controls.addWidget(self.voice_button)
 
-        # 4. Choix du langage
+        # 4. Choix du langage  
         self.language_selector = QComboBox()
         self.language_selector.addItems(["Python", "JavaScript", "C++", "HTML", "SQL"])
         top_controls.addWidget(self.language_selector)
 
-        # 5. Bouton Images
+        # 5. Bouton Images  
         self.image_manager_button = QPushButton("Images")
         self.image_manager_button.clicked.connect(self.open_image_manager)
         top_controls.addWidget(self.image_manager_button)
 
-        # 6. Bouton Mémoire
+        # 6. Bouton Mémoire  
         self.memory_button = QPushButton("Mémoire")
         self.memory_button.clicked.connect(self.open_memory_window)
         top_controls.addWidget(self.memory_button)
 
-        # 7. Bouton Sauvegarder
+        # 7. Bouton Sauvegarder  
         self.save_button = QPushButton("Sauvegarder")
         self.save_button.clicked.connect(self.save_prompt)
         top_controls.addWidget(self.save_button)
@@ -257,10 +265,19 @@ class MainWindow(QWidget):
         layout.addLayout(top_controls)
 
         # --- Milieu : réponse IA (grand champ avec scroll + police Times New Roman 14px) ---
-        self.response_box = QTextEdit()
-        self.response_box.setReadOnly(True)
-        self.response_box.setFont(QFont("Times New Roman", 14))
-        layout.addWidget(self.response_box)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_widget = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        
+        self.scroll_layout.setAlignment(Qt.AlignTop)  # 🔥 ANCRAGE EN HAUT  
+        self.scroll_layout.setSpacing(0)               # Pas d'espace entre les éléments  
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)  # Pas de marges
+        
+        self.scroll_area.setWidget(self.scroll_widget)
+        self.scroll_area.setFont(QFont("Times New Roman", 14))
+        
+        layout.addWidget(self.scroll_area)
 
         # --- Zone d'attente centrée avec spinner + texte ---
         self.waiting_container = QWidget()
@@ -268,27 +285,26 @@ class MainWindow(QWidget):
         waiting_layout = QHBoxLayout(self.waiting_container)
         waiting_layout.setAlignment(Qt.AlignCenter)
 
-        # Spinner GIF
+        # Spinner GIF  
         self.spinner_label = QLabel()
         self.spinner_movie = QMovie("assets/spinner_2.gif")
-        self.spinner_movie.setScaledSize(QSize(24, 24))  # 🔹 Taille réduite du spinner
+        self.spinner_movie.setScaledSize(QSize(24, 24))  # 🔹 Taille réduite du spinner  
         if not self.spinner_movie.isValid():
             print("❌ Le fichier spinner_2.gif est introuvable ou invalide.")
         else:
             self.spinner_label.setMovie(self.spinner_movie)
         self.spinner_label.setVisible(True)
 
-        # Texte à côté du spinner
+        # Texte à côté du spinner  
         self.waiting_label = QLabel("Alice réfléchit...")
         self.waiting_label.setStyleSheet("font-style: italic; font-size: 14px;")
         self.waiting_label.setAlignment(Qt.AlignLeft)
 
-        # Ajouter les deux côte à côte
+        # Ajouter les deux côte à côte  
         waiting_layout.addWidget(self.spinner_label)
         waiting_layout.addWidget(self.waiting_label)
 
         layout.addWidget(self.waiting_container)
-
 
         # --- Bas : champ utilisateur réduit + bouton Envoyer ---
         bottom_layout = QHBoxLayout()
@@ -296,7 +312,7 @@ class MainWindow(QWidget):
         self.input_box = InputTextEdit(submit_callback=self.send_prompt)
         self.input_box.setPlaceholderText("Entrez votre message ici...")
         self.input_box.setFont(QFont("Times New Roman", 14))
-        self.input_box.setFixedHeight(self.height() // 6)  # ~1/3 de la zone réponse
+        self.input_box.setFixedHeight(self.height() // 6)  # ~1/3 de la zone réponse  
         bottom_layout.addWidget(self.input_box)
 
         self.send_button = QPushButton("Envoyer")
@@ -339,7 +355,7 @@ class MainWindow(QWidget):
     def on_text_recognized(self, text):
         print("[DEBUG] Texte brut reconnu :", text)
         if self.is_user_speaking:
-            self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
+            self.scroll_layout.addWidget(StyledLabel(f"<b style='color: lightblue'>[Vous]</b> {text}"))
 
             self.input_box.setText(text)
             self.is_user_speaking = False
@@ -359,13 +375,13 @@ class MainWindow(QWidget):
         self.spinner_movie.start()
         self.waiting_label.setVisible(True)
         print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
-        self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
-        self.response_box.append("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️")
+
+        # Message d'attente
+        self.scroll_layout.addWidget(StyledLabel("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️"))
         QApplication.processEvents()
 
         def run():
             print("[DEBUG] → Début du thread de génération de code")
-            self.set_waiting_message("Alice réfléchit...")
             language = self.language_selector.currentText()
             code_response = self.agent.generate_code(text, language=language)
             print("[DEBUG] Code brut retourné :", repr(code_response))
@@ -385,30 +401,73 @@ class MainWindow(QWidget):
             self.spinner_movie.stop()
             self.spinner_label.setVisible(False)
 
-            # Mise à jour de l'interface via invokeMethod
-            QMetaObject.invokeMethod(self, "append_code_block", Qt.QueuedConnection, Q_ARG(str, highlighted))
+            # Mise à jour de l'interface (Qt thread-safe)
+            QMetaObject.invokeMethod(self, "append_code_block", Qt.QueuedConnection,
+                                    Q_ARG(str, highlighted),
+                                    Q_ARG(str, extracted_code))
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()))
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
-    @pyqtSlot(str)
-    def append_code_block(self, highlighted_code):
-        print("[DEBUG] → append_code_block() appelé")
 
-        self.response_box.append('<b style="color: lightgreen">[Alice]</b> Voici le code généré :<br>')
-        code_html = f'''
-        <div style="
+    @pyqtSlot(str, str)
+    def append_code_block(self, highlighted_code, raw_code):
+        title = StyledLabel("<b style='color: lightgreen'>[Alice]</b> Voici le code généré :")
+        self.scroll_layout.addWidget(title)
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(2)
+        container.setStyleSheet("background-color: #1e1e1e; border-radius: 4px; padding: 0; margin: 0;")
+        
+        code_display = QTextEdit()
+        code_display.setReadOnly(True)
+        code_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        code_display.setStyleSheet("""
             background-color: #1e1e1e;
             color: white;
-            padding: 12px;
-            border-radius: 10px;
-            margin-top: 5px;
-            margin-bottom: 15px;
+            border: none;
+            padding: 4px;
+            margin: 0;
             font-family: Consolas, monospace;
-            font-size: 14px;
-        ">{highlighted_code}</div>
-        '''
-        self.response_box.append(code_html)
-        self.response_box.append('<div style="background: none; color: white; margin: 5px 0;"></div>')
+            font-size: 13px;
+            line-height: 1.2em;
+        """)
+        code_display.setMinimumHeight(50)
+        code_display.setMaximumHeight(200)
+        code_display.setMaximumWidth(450)
+        code_display.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        code_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # Nettoyage du HTML : suppression des <pre> extérieurs inutiles
+        cleaned_html = re.sub(r"</?pre[^>]*>", "", highlighted_code, flags=re.IGNORECASE)
+        code_display.setHtml(f"<div style='line-height: 1.2em; font-family: Consolas, monospace;'>{cleaned_html}</div>")
+
+        container_layout.addWidget(code_display)
+
+        copy_btn = QPushButton("📋 Copier le code")
+        copy_btn.setFixedWidth(160)
+        copy_btn.clicked.connect(lambda: pyperclip.copy(raw_code))
+        copy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3a3a3a;
+                color: white;
+                border-radius: 6px;
+                padding: 6px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+        """)
+
+        container_layout.addWidget(copy_btn, alignment=Qt.AlignRight)
+
+        self.scroll_layout.addWidget(container)
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()
+        ))
 
         if self.voice_checkbox.isChecked():
             self.agent.speak("Voici le code généré.")
@@ -416,35 +475,57 @@ class MainWindow(QWidget):
 
 
     def generate_image_from_text(self, text):
+        def can_generate_image():
+            mem = psutil.virtual_memory()
+            print(f"[DEBUG] RAM utilisée : {mem.percent}%")
+            return mem.percent < 85
+
+        def afficher_erreur(message):
+            self.clear_waiting_message()
+            self.spinner_movie.stop()
+            self.spinner_label.setVisible(False)
+            error_label = QLabel(f"<span style='color:red'><b>[ERREUR]</b> {message}</span>")
+            error_label.setWordWrap(True)
+            self.scroll_layout.addWidget(error_label)
+
         self.set_waiting_message("Alice réfléchit...")
         self.spinner_label.setVisible(True)
         self.spinner_movie.start()
         self.waiting_label.setVisible(True)
-        self.response_box.append(f"<b>[Vous]</b> {text}")
-        self.response_box.append("<b>[Alice]</b> Je vais générer une image... Veuillez patienter ⏳")
+
+        label_wait = QLabel("<b>[Alice]</b> Je vais générer une image... Veuillez patienter ⏳")
+        self.scroll_layout.addWidget(label_wait)
         QApplication.processEvents()
 
         def run():
             print("[DEBUG] → Début de run() image")
+
+            if not can_generate_image():
+                afficher_erreur("Mémoire insuffisante pour générer une image. Veuillez fermer des applications ou réessayer plus tard.")
+                return
+
             result = self.agent.generate_image(text)
             print("[DEBUG] >>> resultat chemin generation image :", result)
-            image_path = result.split("#image")[-1].strip() if "#image" in result else None
+            image_path = result.split("#image")[-1].strip() if result and "#image" in result else None
             print("[DEBUG] >>> resultat chemin image_path :", image_path)
 
-            print("→ Existe ?", os.path.exists(image_path))
-            print("→ Chemin absolu :", os.path.abspath(image_path))
+            if not image_path or not os.path.exists(image_path):
+                afficher_erreur("L'image n'a pas pu être générée. Chemin invalide ou génération échouée.")
+                return
 
-            self.image_path_result = image_path  # Stocke dans l'instance
+            self.image_path_result = image_path
             self.clear_waiting_message()
             self.spinner_movie.stop()
             self.spinner_label.setVisible(False)
-            QTimer.singleShot(0, self.display_generated_image)  # Appel Qt-thread safe
+            QTimer.singleShot(0, self.display_generated_image)
+
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()))
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
 
     def display_generated_image(self):
-        
         print("[DEBUG] → Entrée dans display_generated_image()")
         image_path = getattr(self, 'image_path_result', None)
         if image_path and os.path.exists(image_path):
@@ -453,56 +534,80 @@ class MainWindow(QWidget):
             print(f"[DEBUG] Chargement pixmap depuis : {full_path} | Null ? {pixmap.isNull()}")
 
             if not pixmap.isNull():
-                img_html = f'''
-                <div style="background-color: #1e1e1e; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
-                    <img src="file:///{full_path}" width="350">
-                </div>
-                '''
-                self.response_box.append("<b>[Alice]</b> Voici votre image générée :")
-                self.response_box.append(img_html)
+                label = QLabel("<b>[Alice]</b> Voici votre image générée :")
+                label.setWordWrap(True)
+                label.setStyleSheet("margin-top: 2px; margin-bottom: 2px; line-height: 1.2em;") 
+                self.scroll_layout.addWidget(label)
+
+                img_label = QLabel()
+                img_label.setAlignment(Qt.AlignCenter)
+                img_label.setPixmap(pixmap.scaledToWidth(350, Qt.SmoothTransformation))
+                img_label.setStyleSheet("margin-top: 10px; margin-bottom: 10px;")
+                self.scroll_layout.addWidget(img_label)
             else:
-                self.response_box.append("<b>[Alice]</b> L'image est invalide ou corrompue.")
+                self.scroll_layout.addWidget(QLabel("<b>[Alice]</b> L'image est invalide ou corrompue."))
         else:
-            self.response_box.append("<b>[Alice]</b> Erreur : image introuvable.")
+            self.scroll_layout.addWidget(QLabel("<b>[Alice]</b> Erreur : image introuvable."))
+
         self.voice_recognition_thread.resume()
 
     def generate_model_response(self, prompt):
         self.set_waiting_message("Alice réfléchit...")
-        self.spinner_label.setVisible(True)
-        self.spinner_movie.start()
         print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
-        self.waiting_label.setVisible(True)
-        QApplication.processEvents()
 
         def run():
             response = self.agent.generate(prompt)
-            self.clear_waiting_message()
-            self.spinner_movie.stop()
-            self.spinner_label.setVisible(False)
             print("[DEBUG] Réponse brute :", response)
-            self.response_box.append(f"<b>[Alice]</b> <span style='color: white;'>{escape(response)}</span>")
-            self.waiting_label.setVisible(False)
-            if self.voice_checkbox.isChecked():
-                self.agent.speak(response)
-            self.is_user_speaking = True
-            self.voice_recognition_thread.resume()
+
+            # Passage au thread principal pour mise à jour UI
+            QMetaObject.invokeMethod(
+                self,
+                "display_model_response",
+                Qt.QueuedConnection,
+                Q_ARG(str, response)
+            )
 
         QThreadPool.globalInstance().start(RunnableFunc(run))
+
+    @pyqtSlot(str)
+    def display_model_response(self, response):
+        self.clear_waiting_message()
+        self.spinner_movie.stop()
+        self.spinner_label.setVisible(False)
+
+        label = StyledLabel(f"<b style='color: lightgreen'>[Alice]</b> <span style='color: white;'>{escape(response)}</span>")
+        self.scroll_layout.addWidget(label)
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()))
+
+        if self.voice_checkbox.isChecked():
+            self.agent.speak(response)
+
+        self.is_user_speaking = True
+        self.voice_recognition_thread.resume()
+
 
 
     def send_prompt(self):
         text = self.input_box.toPlainText().strip()
-        if text:
-            self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
-            text_lower = text.lower()
-            if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
-                self.generate_image_from_text(text)
-            elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
-                self.generate_code_from_text(text)
-            else:
-                self.generate_model_response(text)
+        if not text:
+            return
+
+        user_label = StyledLabel(f"<b style='color: lightblue'>[Vous]</b> {escape(text)}")
+        self.scroll_layout.addWidget(user_label)
+        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()))
 
         self.input_box.clear()
+
+        text_lower = text.lower()
+        if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
+            self.generate_image_from_text(text)
+        elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
+            self.generate_code_from_text(text)
+        else:
+            self.generate_model_response(text)
+
 
     def save_prompt(self):
         prompt = self.input_box.toPlainText().strip()
@@ -541,4 +646,38 @@ class MainWindow(QWidget):
     def clear_waiting_message(self):
         self.spinner_movie.stop()
         self.waiting_container.setVisible(False)
+
+    def add_code_block(self, highlighted_code: str, raw_code: str):
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+
+        code_display = QTextEdit()
+        code_display.setReadOnly(True)
+        code_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        code_display.setHtml(f"""
+            <div style="font-family: Consolas; font-size: 13px; line-height: 1.2em; margin:0; padding:0;">
+                {highlighted_code}
+            </div>
+        """)
+
+        container_layout.addWidget(code_display)
+
+        copy_btn = QPushButton("📋 Copier le code")
+        copy_btn.setFixedWidth(150)
+        copy_btn.clicked.connect(lambda: pyperclip.copy(raw_code))
+        copy_btn.setStyleSheet("margin-top: 5px; margin-bottom: 10px;")
+        container_layout.addWidget(copy_btn, alignment=Qt.AlignCenter)
+
+        self.scroll_layout.addWidget(container)
+
+    def can_generate_image(self):
+        mem = psutil.virtual_memory()
+        print(f"[DEBUG] RAM utilisée : {mem.percent}%")
+        return mem.percent < 85
+
+    def afficher_erreur(self, message):
+        self.scroll_layout.addWidget(StyledLabel(
+            f"<span style='color:red'><b>[ERREUR]</b> {message}</span>"
+        ))
+
 

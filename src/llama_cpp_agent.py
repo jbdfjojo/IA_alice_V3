@@ -1,21 +1,20 @@
-import os
 import json
 import pyttsx3
 import subprocess
 from llama_cpp import Llama
 from db.mysql_manager import MySQLManager
-import uuid
-from agent import generate 
-from agent.generate import generate_image  # ✅ Import nécessaire
-import os
 import threading
 from datetime import datetime
+from agent import generate 
+from agent.generate import generate_image
 from diffusers import StableDiffusionPipeline
 import torch_directml
+import os
 
 
 class LlamaCppAgent:
     def __init__(self, model_paths: dict, selected_model="Mistral-7B-Instruct"):
+        self.model_paths = model_paths
         self.model_path = model_paths.get(selected_model)
         if not self.model_path or not os.path.exists(self.model_path):
             raise FileNotFoundError(f"Modèle introuvable : {self.model_path}")
@@ -35,6 +34,12 @@ class LlamaCppAgent:
             self.model = None
 
         self.engine = pyttsx3.init()
+        voices = self.engine.getProperty('voices')
+        for voice in voices:
+            if "french" in voice.name.lower():
+                self.engine.setProperty('voice', voice.id)
+                break
+
         self.speech_enabled = True
         self.db_manager = MySQLManager("localhost", "root", "JOJOJOJO88", "ia_alice")
         self.first_interaction = True
@@ -60,7 +65,6 @@ class LlamaCppAgent:
         should_save = "#save" in prompt
         cleaned_prompt = prompt.replace("#save", "").strip()
 
-        # 🔥 Forcer le français dans toutes les réponses
         final_prompt = (
             "Tu es une IA qui parle exclusivement en français.\n"
             "Réponds toujours de façon claire et concise.\n"
@@ -75,7 +79,6 @@ class LlamaCppAgent:
                 top_p=0.9,
                 stop=["\nUtilisateur:", "\nAlice:", "\n"]
             )
-            print(f"[DEBUG] Réponse brute : {result}")
             if isinstance(result, dict) and "choices" in result and result["choices"]:
                 answer = result["choices"][0]["text"].strip()
             else:
@@ -91,9 +94,6 @@ class LlamaCppAgent:
         except Exception as e:
             return f"[ERREUR] Erreur génération : {str(e)}"
 
-
-
-
     def generate_code(self, user_request: str, language: str = "Python") -> str:
         try:
             prompt = f"""Tu es un assistant expert en programmation. 
@@ -106,7 +106,6 @@ class LlamaCppAgent:
             ```{language.lower()}
             """
 
-
             response = self.model.create_completion(
                 prompt=prompt,
                 max_tokens=400,
@@ -115,22 +114,21 @@ class LlamaCppAgent:
                 stop=["```"]
             )
 
-            print("[DEBUG] Réponse brute :", response)
-
             if "choices" in response and response["choices"]:
                 code = response["choices"][0]["text"].strip()
-
-                # 🧪 Si pas de délimiteur Markdown, on l'encadre proprement
+                if not code:
+                    return "[ERREUR] Code vide ou invalide"
                 if not code.startswith("```"):
                     code = f"```{language.lower()}\n{code}\n```"
 
-                print("[DEBUG] Réponse : ok")
+                if "#save" in user_request:
+                    self.save_to_memory(user_request.replace("#save", "").strip(), code)
+
                 return code
 
             return "[ERREUR] Réponse invalide"
 
         except Exception as e:
-            print("[DEBUG] erreur code")
             return f"[ERREUR] Exception : {e}"
 
     def generate_image(self, prompt: str) -> str:
@@ -145,8 +143,6 @@ class LlamaCppAgent:
                 timeout=60
             )
 
-            print("[DEBUG] Sortie subprocess :", output)
-
             for line in output.splitlines():
                 if "#image" in line:
                     return line.strip()
@@ -160,9 +156,10 @@ class LlamaCppAgent:
         except Exception as e:
             return f"[ERREUR] Exception : {str(e)}"
 
-
     def save_to_memory(self, prompt: str, response: str):
         try:
+            if len(prompt) < 15 or len(response) < 5:
+                return  # filtre basique
             self.db_manager.save_memory(prompt, response)
         except Exception as e:
             print(f"[ERREUR MÉMOIRE] : {e}")
@@ -174,6 +171,3 @@ class LlamaCppAgent:
         if "timeout" in voice_input.lower() or "audio incompréhensible" in voice_input.lower():
             return "[ERREUR] Entrée audio invalide."
         return self.generate(voice_input)
-
-    def is_important(self, prompt: str, response: str) -> bool:
-        return len(prompt) >= 15
