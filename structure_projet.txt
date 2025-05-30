@@ -39,14 +39,18 @@ src/gui/voice_thread.py
 src/utils/database_handler.py
 src/utils/logger.py
 
+
 import os
 import json
 import time
+import psutil 
 import pyttsx3
 import speech_recognition as sr
 import pyperclip
 import re
 from html import escape
+from resource_manager import ResourceManager
+from queue import Queue
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot, QSize
 from PyQt5.QtWidgets import (
@@ -198,6 +202,14 @@ class MainWindow(QWidget):
         index = self.model_selector.findText(last_model)
         self.model_selector.setCurrentIndex(index if index != -1 else 0)
         self.voice_checkbox.setChecked(self.config.get("voice_enabled", True))
+
+        self.resource_manager = ResourceManager()
+        self.resource_manager.register_callback(self.handle_resource_alert)
+        self.resource_manager.start()
+
+        # Gestion des tâches lourdes
+        self.task_queue = Queue()
+        self.task_running = False
 
     def apply_dark_theme(self):
         dark_palette = QPalette()
@@ -395,7 +407,7 @@ class MainWindow(QWidget):
     def on_text_recognized(self, text):
         print("[DEBUG] Texte brut reconnu :", text)
         if self.is_user_speaking:
-            self.response_box.append(f"<b style='color: lightblue'>[Vous]</b> {text}")
+            self.scroll_layout.addWidget(StyledLabel(f"<b style='color: lightblue'>[Vous]</b> {text}"))
 
             self.input_box.setText(text)
             self.is_user_speaking = False
@@ -416,13 +428,8 @@ class MainWindow(QWidget):
         self.waiting_label.setVisible(True)
         print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
 
-        # Affichage utilisateur dans le scroll
-        label = QLabel(f"<b style='color: lightblue'>[Vous]</b> {text}")
-        self.scroll_layout.addWidget(label)
-
         # Message d'attente
-        label_wait = QLabel("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️")
-        self.scroll_layout.addWidget(label_wait)
+        self.scroll_layout.addWidget(StyledLabel("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️"))
         QApplication.processEvents()
 
         def run():
@@ -463,26 +470,33 @@ class MainWindow(QWidget):
 
         container = QWidget()
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)  # Retirer les marges  
-        container_layout.setSpacing(2)  # Espacement réduit  
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(2)
         container.setStyleSheet("background-color: #1e1e1e; border-radius: 4px; padding: 0; margin: 0;")
         
-        # Taille du conteneur réduite  
-        container.setMaximumWidth(450)  # Ajuster la largeur à un maximum plus petit  
-        container.setMinimumHeight(50)    # Hauteur minimale raisonnable  
-        container.setMaximumHeight(200)    # Même hauteur maximale
-
         code_display = QTextEdit()
         code_display.setReadOnly(True)
         code_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        code_display.setStyleSheet("background-color: #1e1e1e; color: white; border: none; padding: 2px; margin: 0;")  
-        code_display.setMinimumHeight(50)   # Hauteur minimum  
-        code_display.setMaximumHeight(150)   # Hauteur maximum  
-        code_display.setMaximumWidth(450)    # Largeur maximale  
-        code_display.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # Barre de défilement verticale seulement si besoin  
-        code_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Pas de barre de défilement horizontale  
-        code_display.setHtml(f"<pre style='font-family: Consolas; font-size: 16px; line-height: 1; margin: 0; padding: 0;'>{highlighted_code}</pre>")
-        
+        code_display.setStyleSheet("""
+            background-color: #1e1e1e;
+            color: white;
+            border: none;
+            padding: 4px;
+            margin: 0;
+            font-family: Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.2em;
+        """)
+        code_display.setMinimumHeight(50)
+        code_display.setMaximumHeight(200)
+        code_display.setMaximumWidth(450)
+        code_display.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        code_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # Nettoyage du HTML : suppression des <pre> extérieurs inutiles
+        cleaned_html = re.sub(r"</?pre[^>]*>", "", highlighted_code, flags=re.IGNORECASE)
+        code_display.setHtml(f"<div style='line-height: 1.2em; font-family: Consolas, monospace;'>{cleaned_html}</div>")
+
         container_layout.addWidget(code_display)
 
         copy_btn = QPushButton("📋 Copier le code")
@@ -499,7 +513,7 @@ class MainWindow(QWidget):
                 background-color: #505050;
             }
         """)
-        
+
         container_layout.addWidget(copy_btn, alignment=Qt.AlignRight)
 
         self.scroll_layout.addWidget(container)
@@ -511,30 +525,54 @@ class MainWindow(QWidget):
             self.agent.speak("Voici le code généré.")
         self.voice_recognition_thread.resume()
 
+
     def generate_image_from_text(self, text):
+        self.task_queue.put(lambda: self._start_image_generation(text))
+        self._process_queue()
+
+        def can_generate_image():
+            mem = psutil.virtual_memory()
+            print(f"[DEBUG] RAM utilisée : {mem.percent}%")
+            return mem.percent < 85
+
+        def afficher_erreur(message):
+            self.clear_waiting_message()
+            self.spinner_movie.stop()
+            self.spinner_label.setVisible(False)
+            error_label = QLabel(f"<span style='color:red'><b>[ERREUR]</b> {message}</span>")
+            error_label.setWordWrap(True)
+            self.scroll_layout.addWidget(error_label)
+
         self.set_waiting_message("Alice réfléchit...")
         self.spinner_label.setVisible(True)
         self.spinner_movie.start()
         self.waiting_label.setVisible(True)
+
         label_wait = QLabel("<b>[Alice]</b> Je vais générer une image... Veuillez patienter ⏳")
         self.scroll_layout.addWidget(label_wait)
         QApplication.processEvents()
 
         def run():
             print("[DEBUG] → Début de run() image")
+
+            if not can_generate_image():
+                afficher_erreur("Mémoire insuffisante pour générer une image. Veuillez fermer des applications ou réessayer plus tard.")
+                return
+
             result = self.agent.generate_image(text)
             print("[DEBUG] >>> resultat chemin generation image :", result)
-            image_path = result.split("#image")[-1].strip() if "#image" in result else None
+            image_path = result.split("#image")[-1].strip() if result and "#image" in result else None
             print("[DEBUG] >>> resultat chemin image_path :", image_path)
 
-            print("→ Existe ?", os.path.exists(image_path))
-            print("→ Chemin absolu :", os.path.abspath(image_path))
+            if not image_path or not os.path.exists(image_path):
+                afficher_erreur("L'image n'a pas pu être générée. Chemin invalide ou génération échouée.")
+                return
 
-            self.image_path_result = image_path  # Stocke dans l'instance
+            self.image_path_result = image_path
             self.clear_waiting_message()
             self.spinner_movie.stop()
             self.spinner_label.setVisible(False)
-            QTimer.singleShot(0, self.display_generated_image)  # Appel Qt-thread safe
+            QTimer.singleShot(0, self.display_generated_image)
 
         QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
             self.scroll_area.verticalScrollBar().maximum()))
@@ -686,4 +724,208 @@ class MainWindow(QWidget):
         container_layout.addWidget(copy_btn, alignment=Qt.AlignCenter)
 
         self.scroll_layout.addWidget(container)
+
+
+    def afficher_erreur(self, message):
+        self.scroll_layout.addWidget(StyledLabel(
+            f"<span style='color:red'><b>[ERREUR]</b> {message}</span>"
+        ))
+
+    def handle_resource_alert(self, overloaded, cpu, ram):
+        if overloaded:
+            alert = f"<b>[Alerte système]</b> CPU: {cpu:.1f}%, RAM: {ram:.1f}% ➜ surcharge détectée ⚠️"
+            self.scroll_layout.addWidget(QLabel(alert))
+            print("[ALERTE] Ressources critiques détectées.")
+        else:
+            print(f"[INFO] Ressources OK — CPU: {cpu:.1f}%, RAM: {ram:.1f}%")
+
+    def _process_queue(self):
+        if not self.task_running and not self.task_queue.empty():
+            self.task_running = True
+            task = self.task_queue.get()
+            QTimer.singleShot(0, task)
+
+    def _start_image_generation(self, text):
+        def run():
+            # même contenu qu’avant dans run()
+            ...
+            self.task_running = False
+            self._process_queue()  # Reprend les tâches en file
+        QThreadPool.globalInstance().start(RunnableFunc(run))
+
+
+
+import json
+import pyttsx3
+import subprocess
+from llama_cpp import Llama
+from db.mysql_manager import MySQLManager
+import threading
+from datetime import datetime
+from agent import generate 
+from agent.generate import generate_image
+from diffusers import StableDiffusionPipeline
+import torch_directml
+import os
+
+
+class LlamaCppAgent:
+    def __init__(self, model_paths: dict, selected_model="Mistral-7B-Instruct"):
+        self.model_paths = model_paths
+        self.model_path = model_paths.get(selected_model)
+        if not self.model_path or not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Modèle introuvable : {self.model_path}")
+        
+        print(f"[INFO] Chargement du modèle : {self.model_path}")
+        try:
+            self.model = Llama(
+                model_path=self.model_path,
+                n_ctx=1024,
+                n_threads=6,
+                n_gpu_layers=0,
+                seed=42,
+                verbose=True
+            )
+        except Exception as e:
+            print(f"[ERREUR] Chargement du modèle : {e}")
+            self.model = None
+
+        self.engine = pyttsx3.init()
+        voices = self.engine.getProperty('voices')
+        for voice in voices:
+            if "french" in voice.name.lower():
+                self.engine.setProperty('voice', voice.id)
+                break
+
+        self.speech_enabled = True
+        self.db_manager = MySQLManager("localhost", "root", "JOJOJOJO88", "ia_alice")
+        self.first_interaction = True
+
+    def set_speech_enabled(self, enabled: bool):
+        self.speech_enabled = enabled
+
+    def speak(self, text: str):
+        if self.speech_enabled and text.strip():
+            try:
+                self.engine.say(text)
+                self.engine.runAndWait()
+            except Exception as e:
+                print(f"[ERREUR VOCALE] : {e}")
+
+    def generate(self, prompt: str) -> str:
+        if not self.model:
+            return "[ERREUR] Modèle non initialisé."
+        prompt = prompt.strip()
+        if not prompt:
+            return "[ERREUR] Prompt vide."
+
+        should_save = "#save" in prompt
+        cleaned_prompt = prompt.replace("#save", "").strip()
+
+        final_prompt = (
+            "Tu es une IA qui parle exclusivement en français.\n"
+            "Réponds toujours de façon claire et concise.\n"
+            f"Utilisateur : {cleaned_prompt}\nAlice :"
+        )
+
+        try:
+            result = self.model.create_completion(
+                prompt=final_prompt,
+                max_tokens=400,
+                temperature=0.7,
+                top_p=0.9,
+                stop=["\nUtilisateur:", "\nAlice:", "\n"]
+            )
+            if isinstance(result, dict) and "choices" in result and result["choices"]:
+                answer = result["choices"][0]["text"].strip()
+            else:
+                answer = "[ERREUR] Réponse invalide."
+
+            if not answer or len(answer.split()) < 2:
+                return "[ERREUR] Réponse trop courte ou vide."
+
+            if should_save:
+                self.save_to_memory(cleaned_prompt, answer)
+
+            return answer
+        except Exception as e:
+            return f"[ERREUR] Erreur génération : {str(e)}"
+
+    def generate_code(self, user_request: str, language: str = "Python") -> str:
+        try:
+            prompt = f"""Tu es un assistant expert en programmation. 
+            Ne retourne que du code. Ne mets aucune explication. Réponds uniquement avec un bloc de code Markdown.
+
+            ### Question
+            {user_request.strip()}
+
+            ### Réponse
+            ```{language.lower()}
+            """
+
+            response = self.model.create_completion(
+                prompt=prompt,
+                max_tokens=400,
+                temperature=0.1,
+                top_p=1.0,
+                stop=["```"]
+            )
+
+            if "choices" in response and response["choices"]:
+                code = response["choices"][0]["text"].strip()
+                if not code:
+                    return "[ERREUR] Code vide ou invalide"
+                if not code.startswith("```"):
+                    code = f"```{language.lower()}\n{code}\n```"
+
+                if "#save" in user_request:
+                    self.save_to_memory(user_request.replace("#save", "").strip(), code)
+
+                return code
+
+            return "[ERREUR] Réponse invalide"
+
+        except Exception as e:
+            return f"[ERREUR] Exception : {e}"
+
+    def generate_image(self, prompt: str) -> str:
+        try:
+            print("[INFO] Lancement de la génération via subprocess")
+            script_path = os.path.abspath("src/agent/generate.py")
+
+            output = subprocess.check_output(
+                ["python", script_path, "--prompt", prompt],
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=60
+            )
+
+            for line in output.splitlines():
+                if "#image" in line:
+                    return line.strip()
+
+            return "[ERREUR] Aucune image générée."
+
+        except subprocess.TimeoutExpired:
+            return "[ERREUR] Timeout de génération."
+        except subprocess.CalledProcessError as e:
+            return f"[ERREUR] Génération échouée : {e.output}"
+        except Exception as e:
+            return f"[ERREUR] Exception : {str(e)}"
+
+    def save_to_memory(self, prompt: str, response: str):
+        try:
+            if len(prompt) < 15 or len(response) < 5:
+                return  # filtre basique
+            self.db_manager.save_memory(prompt, response)
+        except Exception as e:
+            print(f"[ERREUR MÉMOIRE] : {e}")
+
+    def process_voice_input(self, voice_input: str):
+        print(f"[VOICE INPUT] : {voice_input}")
+        if not voice_input.strip():
+            return "[ERREUR] Aucune entrée détectée."
+        if "timeout" in voice_input.lower() or "audio incompréhensible" in voice_input.lower():
+            return "[ERREUR] Entrée audio invalide."
+        return self.generate(voice_input)
 

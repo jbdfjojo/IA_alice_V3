@@ -7,6 +7,7 @@ import speech_recognition as sr
 import pyperclip
 import re
 from html import escape
+from queue import Queue
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot, QSize
 from PyQt5.QtWidgets import (
@@ -52,9 +53,9 @@ class InputTextEdit(QTextEdit):
 class VoiceRecognitionThread(QThread):
     result_signal = pyqtSignal(str)
 
-    def __init__(self, agent):
+    def __init__(self, images):
         super().__init__()
-        self.agent = agent
+        self.images = images
         self.running = True
         self.is_paused = False
         self.is_processing_response = False
@@ -137,17 +138,17 @@ def save_config(config):
 
 
 class MainWindow(QWidget):
-    def __init__(self, model_paths: dict, agent):
+    def __init__(self, model_paths: dict, images):
         super().__init__()
         self.setWindowTitle("Alice - Interface IA")
         self.setGeometry(100, 100, 800, 600)
 
         self.model_paths = model_paths
-        self.agent = agent
+        self.images = images
         self.config = load_config()
 
         self.voice_input_enabled = False
-        self.voice_recognition_thread = VoiceRecognitionThread(self.agent)
+        self.voice_recognition_thread = VoiceRecognitionThread(self.images)
         self.voice_recognition_thread.result_signal.connect(self.on_text_recognized)
         self.is_user_speaking = True
 
@@ -347,8 +348,8 @@ class MainWindow(QWidget):
         self.config["last_model"] = model_name
         save_config(self.config)
         try:
-            self.agent = LlamaCppAgent(self.model_paths, selected_model=model_name)
-            self.voice_recognition_thread.agent = self.agent
+            self.images = LlamaCppAgent(self.model_paths, selected_model=model_name)
+            self.voice_recognition_thread.images = self.images
         except Exception as e:
             print(f"[ERREUR CHARGEMENT MODÈLE] : {e}")
 
@@ -383,7 +384,7 @@ class MainWindow(QWidget):
         def run():
             print("[DEBUG] → Début du thread de génération de code")
             language = self.language_selector.currentText()
-            code_response = self.agent.generate_code(text, language=language)
+            code_response = self.images.generate_code(text, language=language)
             print("[DEBUG] Code brut retourné :", repr(code_response))
 
             match = re.search(r"```(?:\w+)?\s*(.*?)```", code_response, re.DOTALL)
@@ -470,11 +471,12 @@ class MainWindow(QWidget):
         ))
 
         if self.voice_checkbox.isChecked():
-            self.agent.speak("Voici le code généré.")
+            self.images.speak("Voici le code généré.")
         self.voice_recognition_thread.resume()
 
 
     def generate_image_from_text(self, text):
+
         def can_generate_image():
             mem = psutil.virtual_memory()
             print(f"[DEBUG] RAM utilisée : {mem.percent}%")
@@ -504,7 +506,7 @@ class MainWindow(QWidget):
                 afficher_erreur("Mémoire insuffisante pour générer une image. Veuillez fermer des applications ou réessayer plus tard.")
                 return
 
-            result = self.agent.generate_image(text)
+            result = self.images.generate_image(text)
             print("[DEBUG] >>> resultat chemin generation image :", result)
             image_path = result.split("#image")[-1].strip() if result and "#image" in result else None
             print("[DEBUG] >>> resultat chemin image_path :", image_path)
@@ -556,7 +558,7 @@ class MainWindow(QWidget):
         print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
 
         def run():
-            response = self.agent.generate(prompt)
+            response = self.images.generate(prompt)
             print("[DEBUG] Réponse brute :", response)
 
             # Passage au thread principal pour mise à jour UI
@@ -581,7 +583,7 @@ class MainWindow(QWidget):
             self.scroll_area.verticalScrollBar().maximum()))
 
         if self.voice_checkbox.isChecked():
-            self.agent.speak(response)
+            self.images.speak(response)
 
         self.is_user_speaking = True
         self.voice_recognition_thread.resume()
@@ -612,12 +614,12 @@ class MainWindow(QWidget):
     def save_prompt(self):
         prompt = self.input_box.toPlainText().strip()
         if prompt:
-            self.agent.save_to_memory(prompt, "Interaction sauvegardée manuellement.")
+            self.images.save_to_memory(prompt, "Interaction sauvegardée manuellement.")
             self.response_box.append("[✔] Interaction sauvegardée.")
 
     def open_memory_window(self):
-        from gui.memory_window import MemoryViewer
-        self.mem_window = MemoryViewer(self.agent, style_sheet=self.styleSheet())  # <-- garde une référence
+        from memoire.memory_window import MemoryViewer
+        self.mem_window = MemoryViewer(self.images, style_sheet=self.styleSheet())  # <-- garde une référence
         self.mem_window.show()
 
 
@@ -633,7 +635,7 @@ class MainWindow(QWidget):
         QMessageBox.information(self, "Copié", "Code copié dans le presse-papiers.")
 
     def open_image_manager(self):
-        from gui.image_manager import ImageManager
+        from images.image_manager import ImageManager
         self.image_window = ImageManager(style_sheet=self.styleSheet())
         self.image_window.show()
 
@@ -670,14 +672,19 @@ class MainWindow(QWidget):
 
         self.scroll_layout.addWidget(container)
 
-    def can_generate_image(self):
-        mem = psutil.virtual_memory()
-        print(f"[DEBUG] RAM utilisée : {mem.percent}%")
-        return mem.percent < 85
 
     def afficher_erreur(self, message):
         self.scroll_layout.addWidget(StyledLabel(
             f"<span style='color:red'><b>[ERREUR]</b> {message}</span>"
         ))
+
+    def handle_resource_alert(self, overloaded, cpu, ram):
+        if overloaded:
+            alert = f"<b>[Alerte système]</b> CPU: {cpu:.1f}%, RAM: {ram:.1f}% ➜ surcharge détectée ⚠️"
+            self.scroll_layout.addWidget(QLabel(alert))
+            print("[ALERTE] Ressources critiques détectées.")
+        else:
+            print(f"[INFO] Ressources OK — CPU: {cpu:.1f}%, RAM: {ram:.1f}%")
+
 
 

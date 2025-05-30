@@ -1,12 +1,8 @@
 import sys
 import os
 import json
-
-# 👇 Ajoute dynamiquement le chemin de src pour les imports relatifs
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-
-from llama_cpp_agent import LlamaCppAgent
 from main_window import MainWindow
+from llama_cpp_agent import LlamaCppAgent
 from PyQt5.QtWidgets import QApplication
 
 

@@ -2,11 +2,11 @@ import json
 import pyttsx3
 import subprocess
 from llama_cpp import Llama
-from db.mysql_manager import MySQLManager
+from db_mysql.mysql_manager import MySQLManager
 import threading
 from datetime import datetime
-from agent import generate 
-from agent.generate import generate_image
+from images import generate 
+from images.generate import generate_image
 from diffusers import StableDiffusionPipeline
 import torch_directml
 import os
@@ -134,13 +134,13 @@ class LlamaCppAgent:
     def generate_image(self, prompt: str) -> str:
         try:
             print("[INFO] Lancement de la génération via subprocess")
-            script_path = os.path.abspath("src/agent/generate.py")
+            script_path = os.path.abspath("images/generate.py")
 
             output = subprocess.check_output(
                 ["python", script_path, "--prompt", prompt],
                 stderr=subprocess.STDOUT,
                 text=True,
-                timeout=60
+                timeout=120
             )
 
             for line in output.splitlines():
