@@ -8,8 +8,8 @@ from PyQt5.QtWidgets import QApplication
 
 def main():
     model_paths = {
-        "Mistral-7B-Instruct": os.path.abspath("model/mistral-7b-instruct-v0.2.Q8_0.gguf"),
-        "Nous-Hermes-2-Mixtral": os.path.abspath("model/nous-hermes-llama2-13b.Q8_0.gguf")
+        "Mistral-7B-Instruct": os.path.abspath("modelManager/mistral-7b-instruct-v0.2.Q8_0.gguf"),
+        "Nous-Hermes-2-Mixtral": os.path.abspath("modelManager/nous-hermes-llama2-13b.Q8_0.gguf")
     }
 
     config_path = os.path.abspath("config.json")

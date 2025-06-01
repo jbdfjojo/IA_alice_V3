@@ -2,11 +2,11 @@ import json
 import pyttsx3
 import subprocess
 from llama_cpp import Llama
-from db_mysql.mysql_manager import MySQLManager
+from db_mysql_Manager.mysql_manager import MySQLManager
 import threading
 from datetime import datetime
-from images import generate 
-from images.generate import generate_image
+from imagesManager import generate 
+from imagesManager.generate import generate_image
 from diffusers import StableDiffusionPipeline
 import torch_directml
 import os

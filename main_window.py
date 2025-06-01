@@ -19,7 +19,7 @@ from PyQt5.QtGui import QPixmap, QTextCursor, QPalette, QColor, QFont, QMovie
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
 from pygments.formatters import HtmlFormatter
-
+from codeManager.codeManager import codeManager
 from llama_cpp_agent import LlamaCppAgent
 
 from diffusers import StableDiffusionPipeline
@@ -140,6 +140,7 @@ def save_config(config):
 class MainWindow(QWidget):
     def __init__(self, model_paths: dict, images):
         super().__init__()
+
         self.setWindowTitle("Alice - Interface IA")
         self.setGeometry(100, 100, 800, 600)
 
@@ -152,13 +153,12 @@ class MainWindow(QWidget):
         self.voice_recognition_thread.result_signal.connect(self.on_text_recognized)
         self.is_user_speaking = True
 
+        self.llama_agent = LlamaCppAgent(self.model_paths)  # ✅ Ajout ici
+        self.codeManager = codeManager(parent=self, agent=self.llama_agent)  # ✅ Maintenant c’est bon
+
         self.setup_ui()
         self.apply_dark_theme()
 
-        last_model = self.config.get("last_model", "Mistral-7B-Instruct")
-        index = self.model_selector.findText(last_model)
-        self.model_selector.setCurrentIndex(index if index != -1 else 0)
-        self.voice_checkbox.setChecked(self.config.get("voice_enabled", True))
 
     def apply_dark_theme(self):
         dark_palette = QPalette()
@@ -370,110 +370,6 @@ class MainWindow(QWidget):
             else:
                 self.generate_model_response(text)
 
-    def generate_code_from_text(self, text):
-        self.set_waiting_message("Alice réfléchit...")
-        self.spinner_label.setVisible(True)
-        self.spinner_movie.start()
-        self.waiting_label.setVisible(True)
-        print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
-
-        # Message d'attente
-        self.scroll_layout.addWidget(StyledLabel("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️"))
-        QApplication.processEvents()
-
-        def run():
-            print("[DEBUG] → Début du thread de génération de code")
-            language = self.language_selector.currentText()
-            code_response = self.images.generate_code(text, language=language)
-            print("[DEBUG] Code brut retourné :", repr(code_response))
-
-            match = re.search(r"```(?:\w+)?\s*(.*?)```", code_response, re.DOTALL)
-            extracted_code = match.group(1).strip() if match else code_response.strip()
-
-            try:
-                lexer = get_lexer_by_name(language.lower(), stripall=True)
-            except Exception:
-                lexer = get_lexer_by_name("text", stripall=True)
-
-            formatter = HtmlFormatter(style="monokai", noclasses=True)
-            highlighted = highlight(extracted_code, lexer, formatter)
-
-            self.clear_waiting_message()
-            self.spinner_movie.stop()
-            self.spinner_label.setVisible(False)
-
-            # Mise à jour de l'interface (Qt thread-safe)
-            QMetaObject.invokeMethod(self, "append_code_block", Qt.QueuedConnection,
-                                    Q_ARG(str, highlighted),
-                                    Q_ARG(str, extracted_code))
-        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
-            self.scroll_area.verticalScrollBar().maximum()))
-
-        QThreadPool.globalInstance().start(RunnableFunc(run))
-
-
-    @pyqtSlot(str, str)
-    def append_code_block(self, highlighted_code, raw_code):
-        title = StyledLabel("<b style='color: lightgreen'>[Alice]</b> Voici le code généré :")
-        self.scroll_layout.addWidget(title)
-
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(2)
-        container.setStyleSheet("background-color: #1e1e1e; border-radius: 4px; padding: 0; margin: 0;")
-        
-        code_display = QTextEdit()
-        code_display.setReadOnly(True)
-        code_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        code_display.setStyleSheet("""
-            background-color: #1e1e1e;
-            color: white;
-            border: none;
-            padding: 4px;
-            margin: 0;
-            font-family: Consolas, monospace;
-            font-size: 13px;
-            line-height: 1.2em;
-        """)
-        code_display.setMinimumHeight(50)
-        code_display.setMaximumHeight(200)
-        code_display.setMaximumWidth(450)
-        code_display.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        code_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        # Nettoyage du HTML : suppression des <pre> extérieurs inutiles
-        cleaned_html = re.sub(r"</?pre[^>]*>", "", highlighted_code, flags=re.IGNORECASE)
-        code_display.setHtml(f"<div style='line-height: 1.2em; font-family: Consolas, monospace;'>{cleaned_html}</div>")
-
-        container_layout.addWidget(code_display)
-
-        copy_btn = QPushButton("📋 Copier le code")
-        copy_btn.setFixedWidth(160)
-        copy_btn.clicked.connect(lambda: pyperclip.copy(raw_code))
-        copy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3a3a3a;
-                color: white;
-                border-radius: 6px;
-                padding: 6px;
-            }
-            QPushButton:hover {
-                background-color: #505050;
-            }
-        """)
-
-        container_layout.addWidget(copy_btn, alignment=Qt.AlignRight)
-
-        self.scroll_layout.addWidget(container)
-        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
-            self.scroll_area.verticalScrollBar().maximum()
-        ))
-
-        if self.voice_checkbox.isChecked():
-            self.images.speak("Voici le code généré.")
-        self.voice_recognition_thread.resume()
-
 
     def generate_image_from_text(self, text):
 
@@ -606,7 +502,8 @@ class MainWindow(QWidget):
         if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
             self.generate_image_from_text(text)
         elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
-            self.generate_code_from_text(text)
+            self.codeManager.generate_code_from_text(text)
+
         else:
             self.generate_model_response(text)
 
