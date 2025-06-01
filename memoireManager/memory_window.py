@@ -1,5 +1,3 @@
-# src/gui/memory_window.py
-
 import mysql.connector
 from mysql.connector import Error
 from PyQt5.QtWidgets import (
@@ -121,3 +119,14 @@ class MemoryViewer(QWidget):
             self.conn.close()
             print("[MySQL] Connexion fermée.")
         super().close()
+
+    def save_to_database(self, prompt, response):
+        try:
+            self.cursor.execute(
+                "INSERT INTO memory (prompt, response) VALUES (%s, %s)",
+                (prompt, response)
+            )
+            self.conn.commit()
+            print("[MySQL] Interaction sauvegardée.")
+        except Error as e:
+            print(f"[MySQL] Erreur lors de l'insertion : {e}")
