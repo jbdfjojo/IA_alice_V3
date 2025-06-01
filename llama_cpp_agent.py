@@ -134,7 +134,7 @@ class LlamaCppAgent:
     def generate_image(self, prompt: str) -> str:
         try:
             print("[INFO] Lancement de la génération via subprocess")
-            script_path = os.path.abspath("images/generate.py")
+            script_path = os.path.abspath("imagesManager/generate.py")
 
             output = subprocess.check_output(
                 ["python", script_path, "--prompt", prompt],

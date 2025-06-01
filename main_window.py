@@ -20,6 +20,7 @@ from pygments import highlight
 from pygments.lexers import get_lexer_by_name
 from pygments.formatters import HtmlFormatter
 from codeManager.codeManager import codeManager
+from imagesManager.image_manager import Image_Manager
 from llama_cpp_agent import LlamaCppAgent
 
 from diffusers import StableDiffusionPipeline
@@ -155,6 +156,7 @@ class MainWindow(QWidget):
 
         self.llama_agent = LlamaCppAgent(self.model_paths)  # ✅ Ajout ici
         self.codeManager = codeManager(parent=self, agent=self.llama_agent)  # ✅ Maintenant c’est bon
+        self.image_manager = Image_Manager(parent=self, agent=self.llama_agent)
 
         self.setup_ui()
         self.apply_dark_theme()
@@ -364,90 +366,11 @@ class MainWindow(QWidget):
             text_lower = text.lower()
 
             if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
-                self.generate_image_from_text(text)
+                self.image_manager.generate_image_from_text(text)
             elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
                 self.generate_code_from_text(text)
             else:
                 self.generate_model_response(text)
-
-
-    def generate_image_from_text(self, text):
-
-        def can_generate_image():
-            mem = psutil.virtual_memory()
-            print(f"[DEBUG] RAM utilisée : {mem.percent}%")
-            return mem.percent < 85
-
-        def afficher_erreur(message):
-            self.clear_waiting_message()
-            self.spinner_movie.stop()
-            self.spinner_label.setVisible(False)
-            error_label = QLabel(f"<span style='color:red'><b>[ERREUR]</b> {message}</span>")
-            error_label.setWordWrap(True)
-            self.scroll_layout.addWidget(error_label)
-
-        self.set_waiting_message("Alice réfléchit...")
-        self.spinner_label.setVisible(True)
-        self.spinner_movie.start()
-        self.waiting_label.setVisible(True)
-
-        label_wait = QLabel("<b>[Alice]</b> Je vais générer une image... Veuillez patienter ⏳")
-        self.scroll_layout.addWidget(label_wait)
-        QApplication.processEvents()
-
-        def run():
-            print("[DEBUG] → Début de run() image")
-
-            if not can_generate_image():
-                afficher_erreur("Mémoire insuffisante pour générer une image. Veuillez fermer des applications ou réessayer plus tard.")
-                return
-
-            result = self.images.generate_image(text)
-            print("[DEBUG] >>> resultat chemin generation image :", result)
-            image_path = result.split("#image")[-1].strip() if result and "#image" in result else None
-            print("[DEBUG] >>> resultat chemin image_path :", image_path)
-
-            if not image_path or not os.path.exists(image_path):
-                afficher_erreur("L'image n'a pas pu être générée. Chemin invalide ou génération échouée.")
-                return
-
-            self.image_path_result = image_path
-            self.clear_waiting_message()
-            self.spinner_movie.stop()
-            self.spinner_label.setVisible(False)
-            QTimer.singleShot(0, self.display_generated_image)
-
-        QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
-            self.scroll_area.verticalScrollBar().maximum()))
-
-        QThreadPool.globalInstance().start(RunnableFunc(run))
-
-
-    def display_generated_image(self):
-        print("[DEBUG] → Entrée dans display_generated_image()")
-        image_path = getattr(self, 'image_path_result', None)
-        if image_path and os.path.exists(image_path):
-            full_path = os.path.abspath(image_path).replace("\\", "/")
-            pixmap = QPixmap(full_path)
-            print(f"[DEBUG] Chargement pixmap depuis : {full_path} | Null ? {pixmap.isNull()}")
-
-            if not pixmap.isNull():
-                label = QLabel("<b>[Alice]</b> Voici votre image générée :")
-                label.setWordWrap(True)
-                label.setStyleSheet("margin-top: 2px; margin-bottom: 2px; line-height: 1.2em;") 
-                self.scroll_layout.addWidget(label)
-
-                img_label = QLabel()
-                img_label.setAlignment(Qt.AlignCenter)
-                img_label.setPixmap(pixmap.scaledToWidth(350, Qt.SmoothTransformation))
-                img_label.setStyleSheet("margin-top: 10px; margin-bottom: 10px;")
-                self.scroll_layout.addWidget(img_label)
-            else:
-                self.scroll_layout.addWidget(QLabel("<b>[Alice]</b> L'image est invalide ou corrompue."))
-        else:
-            self.scroll_layout.addWidget(QLabel("<b>[Alice]</b> Erreur : image introuvable."))
-
-        self.voice_recognition_thread.resume()
 
     def generate_model_response(self, prompt):
         self.set_waiting_message("Alice réfléchit...")
@@ -500,7 +423,7 @@ class MainWindow(QWidget):
 
         text_lower = text.lower()
         if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
-            self.generate_image_from_text(text)
+            self.image_manager.generate_image_from_text(text)
         elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
             self.codeManager.generate_code_from_text(text)
 
@@ -519,8 +442,6 @@ class MainWindow(QWidget):
         self.mem_window = MemoryViewer(self.images, style_sheet=self.styleSheet())  # <-- garde une référence
         self.mem_window.show()
 
-
-
     def closeEvent(self, event):
         self.voice_recognition_thread.stop()
         event.accept()
@@ -532,8 +453,7 @@ class MainWindow(QWidget):
         QMessageBox.information(self, "Copié", "Code copié dans le presse-papiers.")
 
     def open_image_manager(self):
-        from images.image_manager import ImageManager
-        self.image_window = ImageManager(style_sheet=self.styleSheet())
+        self.image_window = Image_Manager(style_sheet=self.styleSheet())
         self.image_window.show()
 
     def set_waiting_message(self, message: str):

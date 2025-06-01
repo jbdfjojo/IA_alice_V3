@@ -1,49 +1,41 @@
+# --- Standard library ---
 import os
 import json
 import time
-import psutil 
-import pyttsx3
-import speech_recognition as sr
-import pyperclip
 import re
+import psutil
+import pyperclip
 from html import escape
-from queue import Queue
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer, QMetaObject, Q_ARG, pyqtSlot, QObject
+# --- Third-party libraries ---
+import speech_recognition as sr
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name
+from pygments.formatters import HtmlFormatter
+
+# --- PyQt5 ---
+from PyQt5.QtCore import (
+    Qt, QThread, pyqtSignal, QMutex, QThreadPool, QRunnable, QTimer,
+    QMetaObject, Q_ARG, pyqtSlot, QObject
+)
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel,
     QCheckBox, QComboBox, QMessageBox, QScrollArea, QApplication
 )
 from PyQt5.QtGui import QPixmap, QTextCursor, QPalette, QColor, QFont, QMovie
 
-from pygments import highlight
-from pygments.lexers import get_lexer_by_name
-from pygments.formatters import HtmlFormatter
+from utils.utils import RunnableFunc, StyledLabel
 
-from llama_cpp_agent import LlamaCppAgent
+# --- Projet ---
+from llama_cpp_agent import LlamaCppAgent  # utilisé pour self.agent
+# from diffusers import StableDiffusionPipeline  # si inutilisé ici, peut être commenté
 
-from diffusers import StableDiffusionPipeline
-
+# --- Qt meta-type registration (facultatif) ---
 try:
     from PyQt5.QtCore import qRegisterMetaType
-    from PyQt5.QtGui import QTextCursor
     qRegisterMetaType(QTextCursor, "QTextCursor")
 except Exception as e:
     print(f"Warning qRegisterMetaType QTextCursor skipped: {e}")
-
-class RunnableFunc(QRunnable):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    def run(self):
-        self.fn()
-
-class StyledLabel(QLabel):
-    def __init__(self, html):
-        super().__init__(html)
-        self.setWordWrap(True)
-        self.setStyleSheet("margin-top: 2px; margin-bottom: 2px; line-height: 1.2em; padding: 0;")
 
 
 class codeManager(QObject):
