@@ -390,6 +390,11 @@ class MainWindow(QWidget):
         self.scroll_layout.addWidget(StyledLabel(
             f"<span style='color:red'><b>[ERREUR]</b> {message}</span>"
         ))
+        
+        # Scroll automatique vers le bas
+        QTimer.singleShot(0, lambda: self.parent.scroll_area.verticalScrollBar().setValue(
+            self.parent.scroll_area.verticalScrollBar().maximum()))
+
 
     def handle_resource_alert(self, overloaded, cpu, ram):
         if overloaded:

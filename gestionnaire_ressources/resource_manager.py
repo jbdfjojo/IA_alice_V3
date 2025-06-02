@@ -34,7 +34,7 @@ class IAResourceManager(QObject):
             message = f"Surcharge détectée : CPU={cpu_usage}%, RAM={ram_usage / (1024**3):.2f}GB"
             QMetaObject.invokeMethod(self, lambda: self.overload_signal.emit(message), Qt.QueuedConnection)
             return False
-        QMetaObject.invokeMethod(self, self.ready_signal.emit, Qt.QueuedConnection)
+        QMetaObject.invokeMethod(self, "ready_signal", Qt.QueuedConnection)
         return True
 
     def submit(self, fn, *args, **kwargs):

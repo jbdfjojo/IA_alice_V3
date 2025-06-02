@@ -241,6 +241,11 @@ class Image_Manager(QWidget):
             self.parent.scroll_layout.addWidget(QLabel("<b>[Alice]</b> Erreur : image introuvable."))
 
         self.parent.voice_recognition_thread.resume()
+        
+        # Scroll automatique vers le bas
+        QTimer.singleShot(100, lambda: self.parent.scroll_area.verticalScrollBar().setValue(
+            self.parent.scroll_area.verticalScrollBar().maximum()))
+
 
 
 if __name__ == "__main__":

@@ -179,3 +179,4 @@ class codeManager(QObject):
 
         # Reprise reconnaissance vocale si thread prévu
         self.parent.voice_recognition_thread.resume()
+
