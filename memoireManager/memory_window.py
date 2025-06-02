@@ -8,12 +8,12 @@ from PyQt5.QtCore import Qt
 
 
 class MemoryViewer(QWidget):
-    def __init__(self, memory_data, style_sheet=None):
+    def __init__(self, memory_data=None, style_sheet=None):
         super().__init__()
 
         self.setWindowTitle("Mémoire d'Alice")
         self.resize(800, 600)
-        if style_sheet:  # Applique le style si fourni
+        if style_sheet:
             self.setStyleSheet(style_sheet)
 
         # Connexion MySQL
@@ -93,6 +93,7 @@ class MemoryViewer(QWidget):
             self.conn.commit()
             self.scroll_layout.removeWidget(frame)
             frame.setParent(None)
+            frame.deleteLater()
         except Error as e:
             print(f"[MySQL] Erreur de suppression : {e}")
 
@@ -110,15 +111,16 @@ class MemoryViewer(QWidget):
                     child = self.scroll_layout.takeAt(0)
                     if child.widget():
                         child.widget().setParent(None)
+                        child.widget().deleteLater()
             except Error as e:
                 print(f"[MySQL] Erreur lors de la suppression totale : {e}")
 
-    def close(self):
+    def closeEvent(self, event):
         if self.conn.is_connected():
             self.cursor.close()
             self.conn.close()
             print("[MySQL] Connexion fermée.")
-        super().close()
+        event.accept()
 
     def save_to_database(self, prompt, response):
         try:

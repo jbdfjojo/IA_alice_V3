@@ -9,6 +9,7 @@ from PyQt5.QtCore import Qt, QSize
 
 from utils.utils import StyledLabel, InputTextEdit
 
+
 class InterfaceManager:
     def __init__(self, parent):
         self.parent = parent

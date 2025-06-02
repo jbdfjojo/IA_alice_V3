@@ -11,14 +11,18 @@ from diffusers import StableDiffusionPipeline
 import torch_directml
 import os
 
+from erreurManager.error_handler import ErrorHandler
+
 
 class LlamaCppAgent:
-    def __init__(self, model_paths: dict, selected_model="Mistral-7B-Instruct"):
+    def __init__(self, model_paths: dict, selected_model="Mistral-7B-Instruct", error_handler=None):
+        self.error_handler = error_handler or ErrorHandler()
+
         self.model_paths = model_paths
         self.model_path = model_paths.get(selected_model)
         if not self.model_path or not os.path.exists(self.model_path):
             raise FileNotFoundError(f"Modèle introuvable : {self.model_path}")
-        
+
         print(f"[INFO] Chargement du modèle : {self.model_path}")
         try:
             self.model = Llama(
@@ -30,7 +34,7 @@ class LlamaCppAgent:
                 verbose=True
             )
         except Exception as e:
-            print(f"[ERREUR] Chargement du modèle : {e}")
+            self.error_handler.handle_error(e, context="Chargement du modèle", user_message="Erreur lors du chargement du modèle")
             self.model = None
 
         self.engine = pyttsx3.init()
@@ -53,7 +57,7 @@ class LlamaCppAgent:
                 self.engine.say(text)
                 self.engine.runAndWait()
             except Exception as e:
-                print(f"[ERREUR VOCALE] : {e}")
+                self.error_handler.handle_error(e, context="Synthèse vocale", user_message="Erreur vocale")
 
     def generate(self, prompt: str) -> str:
         if not self.model:
@@ -92,7 +96,8 @@ class LlamaCppAgent:
 
             return answer
         except Exception as e:
-            return f"[ERREUR] Erreur génération : {str(e)}"
+            self.error_handler.handle_error(e, context="Génération texte", user_message="Erreur génération de texte")
+            return "[ERREUR] Erreur interne lors de la génération."
 
     def generate_code(self, user_request: str, language: str = "Python") -> str:
         try:
@@ -129,7 +134,8 @@ class LlamaCppAgent:
             return "[ERREUR] Réponse invalide"
 
         except Exception as e:
-            return f"[ERREUR] Exception : {e}"
+            self.error_handler.handle_error(e, context="Génération code", user_message="Erreur génération de code")
+            return "[ERREUR] Erreur interne lors de la génération de code."
 
     def generate_image(self, prompt: str) -> str:
         try:
@@ -149,12 +155,17 @@ class LlamaCppAgent:
 
             return "[ERREUR] Aucune image générée."
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
+            self.error_handler.handle_error(e, context="Génération image", user_message="Timeout génération image")
             return "[ERREUR] Timeout de génération."
+
         except subprocess.CalledProcessError as e:
-            return f"[ERREUR] Génération échouée : {e.output}"
+            self.error_handler.handle_error(e, context="Génération image", user_message=f"Erreur subprocess : {e.output}")
+            return "[ERREUR] Génération échouée."
+
         except Exception as e:
-            return f"[ERREUR] Exception : {str(e)}"
+            self.error_handler.handle_error(e, context="Génération image", user_message="Erreur interne génération image")
+            return "[ERREUR] Exception interne."
 
     def save_to_memory(self, prompt: str, response: str):
         try:
@@ -162,7 +173,7 @@ class LlamaCppAgent:
                 return  # filtre basique
             self.db_manager.save_memory(prompt, response)
         except Exception as e:
-            print(f"[ERREUR MÉMOIRE] : {e}")
+            self.error_handler.handle_error(e, context="Sauvegarde mémoire", user_message="Erreur sauvegarde mémoire")
 
     def process_voice_input(self, voice_input: str):
         print(f"[VOICE INPUT] : {voice_input}")

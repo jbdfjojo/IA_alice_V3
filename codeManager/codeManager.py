@@ -40,7 +40,7 @@ except Exception as e:
 
 class codeManager(QObject):
     def __init__(self, parent=None, agent=None):
-        super().__init__()  # ← OBLIGATOIRE
+        super().__init__()  # Obligatoire
         self.parent = parent
         self.agent = agent
 
@@ -51,8 +51,10 @@ class codeManager(QObject):
         self.parent.waiting_label.setVisible(True)
         print("[DEBUG] >>> Appel de generate_code_from_text() avec :", text)
 
-        # Message d'attente
-        self.parent.scroll_layout.addWidget(StyledLabel("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️"))
+        # Message d'attente affiché dans l'interface
+        self.parent.scroll_layout.addWidget(
+            StyledLabel("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️")
+        )
         QApplication.processEvents()
 
         def run():
@@ -61,9 +63,11 @@ class codeManager(QObject):
             code_response = self.agent.generate_code(text, language=language)
             print("[DEBUG] Code brut retourné :", repr(code_response))
 
+            # Extraction du code entre balises ```...```
             match = re.search(r"```(?:\w+)?\s*(.*?)```", code_response, re.DOTALL)
             extracted_code = match.group(1).strip() if match else code_response.strip()
 
+            # Choix du lexer Pygments selon langage
             try:
                 lexer = get_lexer_by_name(language.lower(), stripall=True)
             except Exception:
@@ -72,16 +76,25 @@ class codeManager(QObject):
             formatter = HtmlFormatter(style="monokai", noclasses=True)
             highlighted = highlight(extracted_code, lexer, formatter)
 
+            # Arrêt message attente et spinner
             self.parent.clear_waiting_message()
             self.parent.spinner_movie.stop()
             self.parent.spinner_label.setVisible(False)
 
             # Mise à jour de l'interface (Qt thread-safe)
-            QMetaObject.invokeMethod(self, "append_code_block", Qt.QueuedConnection,
-                                    Q_ARG(str, highlighted),
-                                    Q_ARG(str, extracted_code))
-        QTimer.singleShot(100, lambda:self.parent.scroll_area.verticalScrollBar().setValue(self.parent.scroll_area.verticalScrollBar().maximum()))
+            QMetaObject.invokeMethod(
+                self,
+                "append_code_block",
+                Qt.QueuedConnection,
+                Q_ARG(str, highlighted),
+                Q_ARG(str, extracted_code)
+            )
 
+        # Scroll vers le bas léger pour lisibilité
+        QTimer.singleShot(100, lambda: self.parent.scroll_area.verticalScrollBar().setValue(
+            self.parent.scroll_area.verticalScrollBar().maximum()))
+
+        # Lancement thread via QRunnable
         QThreadPool.globalInstance().start(RunnableFunc(run))
 
 
@@ -94,8 +107,10 @@ class codeManager(QObject):
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(2)
-        container.setStyleSheet("background-color: #1e1e1e; border-radius: 4px; padding: 0; margin: 0;")
-        
+        container.setStyleSheet(
+            "background-color: #1e1e1e; border-radius: 4px; padding: 0; margin: 0;"
+        )
+
         code_display = QTextEdit()
         code_display.setReadOnly(True)
         code_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -115,7 +130,7 @@ class codeManager(QObject):
         code_display.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         code_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        # Nettoyage du HTML : suppression des <pre> extérieurs inutiles
+        # Nettoyage du HTML pour retirer <pre> inutiles
         cleaned_html = re.sub(r"</?pre[^>]*>", "", highlighted_code, flags=re.IGNORECASE)
         code_display.setHtml(f"<div style='line-height: 1.2em; font-family: Consolas, monospace;'>{cleaned_html}</div>")
 
@@ -143,13 +158,13 @@ class codeManager(QObject):
         QTimer.singleShot(100, lambda: self.parent.scroll_area.verticalScrollBar().setValue(
             self.parent.scroll_area.verticalScrollBar().maximum()))
 
-
-        # ✅ Mémorisation pour bouton "Sauvegarder"
+        # ✅ Stockage du dernier prompt / réponse pour bouton sauvegarder
         self.parent.last_response = raw_code
         self.parent.last_prompt = self.parent.input_box.toPlainText().strip() or "Code généré"
 
+        # Synthèse vocale si activée
         if self.parent.voice_checkbox.isChecked():
             self.parent.images.speak("Voici le code généré.")
+
+        # Reprise reconnaissance vocale si thread prévu
         self.parent.voice_recognition_thread.resume()
-
-
