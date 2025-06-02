@@ -81,8 +81,12 @@ class Image_Manager(QWidget):
 
         # Initialisation du gestionnaire de ressources IA
         self.resource_manager = IAResourceManager(self.agent, max_threads=3, max_memory_gb=24)
-        self.resource_manager.overload_signal.connect(self.parent.handle_resource_overload)
-        self.resource_manager.ready_signal.connect(self.parent.handle_resource_ready)
+        if self.parent is not None:
+            self.resource_manager.overload_signal.connect(self.parent.handle_resource_overload)
+            self.resource_manager.ready_signal.connect(self.parent.handle_resource_ready)
+        else:
+            print("[WARN] Image_Manager: Pas de parent défini, signaux non connectés.")
+
 
         self.load_images()
 

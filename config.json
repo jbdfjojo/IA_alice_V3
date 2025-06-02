@@ -4,5 +4,5 @@
         "Mistral-7B-Instruct": "modelManager/mistral-7b-instruct-v0.2.Q8_0.gguf",
         "Nous-Hermes": "modelManager/nous-hermes-llama2-13b.Q8_0.gguf"
     },
-    "voice_enabled": false
+    "voice_enabled": true
 }

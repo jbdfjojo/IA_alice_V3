@@ -85,20 +85,33 @@ class VoiceRecognitionThread(QThread):
                     continue
 
                 try:
-                    audio = self.recognizer.listen(source, timeout=10)
+                    try:
+                        audio = self.recognizer.listen(source, timeout=10)
+                    except sr.WaitTimeoutError:
+                        continue  # Aucun son détecté dans le délai imparti
 
                     if self.is_paused:
                         continue
 
-                    text = self.recognizer.recognize_google(audio, language="fr-FR").lower()
+                    text = self.recognizer.recognize_google(audio, language="fr-FR")
                     self.last_active_time = time.time()
 
-                    if "alice" in text:
-                        cleaned_text = text.split("alice", 1)[-1].strip()
+                    text_strip = text.strip()
+                    text_lower = text_strip.lower()
+
+                    # On ne traite que si "alice" est dans la phrase
+                    if "alice" in text_lower:
+                        # Si commence par "alice", on retire juste "alice" au début
+                        if text_lower.startswith("alice"):
+                            cleaned_text = text_strip[len("alice"):].lstrip()
+                        else:
+                            cleaned_text = text_strip  # sinon phrase complète
+
                         if cleaned_text:
                             self.is_processing_response = True
                             self.result_signal.emit(cleaned_text)
-                except:
+                except Exception as e:
+                    # Tu peux logger l'erreur ici si tu veux
                     pass
                 finally:
                     self.is_processing_response = False
@@ -147,17 +160,23 @@ class MainWindow(QWidget):
         self.images = images
         self.config = load_config()
 
-        self.voice_input_enabled = False
+        # 🎤 Initialisation du thread de reconnaissance vocale
+        self.voice_input_enabled = self.config.get("voice_enabled", False)
         self.voice_recognition_thread = VoiceRecognitionThread(self.images)
         self.voice_recognition_thread.result_signal.connect(self.on_text_recognized)
         self.is_user_speaking = True
+
+        # 🚀 Lance automatiquement la reconnaissance si activée dans la config
+        if self.voice_input_enabled:
+            self.voice_recognition_thread.start()
+
 
         self.llama_agent = LlamaCppAgent(self.model_paths)
         self.codeManager = codeManager(parent=self, agent=self.llama_agent)
         self.image_manager = Image_Manager(parent=self, agent=self.llama_agent)
 
         # Initialisation du gestionnaire de ressources IA
-        self.resource_manager = IAResourceManager(self.llama_agent, max_threads=3, max_memory_gb=24)
+        self.resource_manager = IAResourceManager(self.llama_agent, max_threads=3, max_memory_gb=15)
         self.resource_manager.overload_signal.connect(self.handle_resource_overload)
         self.resource_manager.ready_signal.connect(self.handle_resource_ready)
 
@@ -178,13 +197,16 @@ class MainWindow(QWidget):
             self.voice_button.setText("🎤 Micro: ON")
             self.voice_button.setStyleSheet("background-color: lightgreen; font-weight: bold;")
             if not self.voice_recognition_thread.isRunning():
+                self.voice_recognition_thread = VoiceRecognitionThread(self.images)
+                self.voice_recognition_thread.result_signal.connect(self.on_text_recognized)
                 self.voice_recognition_thread.start()
             else:
                 self.voice_recognition_thread.resume()
         else:
             self.voice_button.setText("🎤 Micro: OFF")
             self.voice_button.setStyleSheet("background-color: lightcoral; font-weight: bold;")
-            self.voice_recognition_thread.stop()
+            self.voice_recognition_thread.pause()
+
 
     def load_model(self, model_name):
         self.config["last_model"] = model_name
@@ -200,17 +222,29 @@ class MainWindow(QWidget):
         if self.is_user_speaking:
             self.scroll_layout.addWidget(StyledLabel(f"<b style='color: lightblue'>[Vous]</b> {text}"))
 
-            self.input_box.setText(text)
             self.is_user_speaking = False
             self.voice_recognition_thread.pause()
-            text_lower = text.lower()
+
+            text_strip = text.strip()
+
+            # Si la phrase commence par "alice" (insensible à la casse)
+            if text_strip.lower().startswith("alice"):
+                # On retire "alice" au début + un éventuel espace juste après
+                cleaned_text = text_strip[len("alice"):].lstrip()
+            else:
+                # Sinon, on garde la phrase complète
+                cleaned_text = text_strip
+
+            text_lower = cleaned_text.lower()
 
             if any(kw in text_lower for kw in ["image", "dessine", "dessin", "photo", "génère une image"]):
-                self.image_manager.generate_image_from_text(text)
+                self.image_manager.generate_image_from_text(cleaned_text)
             elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
-                self.generate_code_from_text(text)
+                self.codeManager.generate_code_from_text(cleaned_text)
             else:
-                self.generate_model_response(text)
+                self.generate_model_response(cleaned_text)
+
+
 
     def generate_model_response(self, prompt):
         self.set_waiting_message("Alice réfléchit...")
