@@ -13,6 +13,7 @@ import speech_recognition as sr
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
 from pygments.formatters import HtmlFormatter
+from gestionnaire_ressources.resource_manager import IAResourceManager
 
 # --- PyQt5 ---
 from PyQt5.QtCore import (
@@ -77,6 +78,11 @@ class Image_Manager(QWidget):
 
         self.scroll.setWidget(self.container)
         self.layout.addWidget(self.scroll)
+
+        # Initialisation du gestionnaire de ressources IA
+        self.resource_manager = IAResourceManager(self.agent, max_threads=3, max_memory_gb=24)
+        self.resource_manager.overload_signal.connect(self.parent.handle_resource_overload)
+        self.resource_manager.ready_signal.connect(self.parent.handle_resource_ready)
 
         self.load_images()
 
@@ -162,6 +168,11 @@ class Image_Manager(QWidget):
         label_wait = QLabel("<b>[Alice]</b> Je vais g\u00e9n\u00e9rer une image... Veuillez patienter \u23f3")
         self.parent.scroll_layout.addWidget(label_wait)
         QApplication.processEvents()
+
+        if not self.resource_manager.ressources_disponibles():
+            print("[INFO] Requête refusée: surcharge CPU ou RAM")
+            return "Les ressources système sont surchargées. Veuillez réessayer plus tard."
+
 
         def run():
             print("[DEBUG] \u2192 D\u00e9but de run() image")

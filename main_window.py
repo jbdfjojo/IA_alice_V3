@@ -22,6 +22,7 @@ from pygments.formatters import HtmlFormatter
 from codeManager.codeManager import codeManager
 from imagesManager.image_manager import Image_Manager
 from interfaceManager.interface_manager import InterfaceManager
+from gestionnaire_ressources.resource_manager import IAResourceManager
 from llama_cpp_agent import LlamaCppAgent
 
 from diffusers import StableDiffusionPipeline
@@ -155,6 +156,12 @@ class MainWindow(QWidget):
         self.codeManager = codeManager(parent=self, agent=self.llama_agent)
         self.image_manager = Image_Manager(parent=self, agent=self.llama_agent)
 
+        # Initialisation du gestionnaire de ressources IA
+        self.resource_manager = IAResourceManager(self.llama_agent, max_threads=3, max_memory_gb=24)
+        self.resource_manager.overload_signal.connect(self.handle_resource_overload)
+        self.resource_manager.ready_signal.connect(self.handle_resource_ready)
+
+
         self.resize(800, 500)  # 🖥️ Taille de départ de la fenêtre
 
         self.interface = InterfaceManager(self)
@@ -223,7 +230,12 @@ class MainWindow(QWidget):
                 Q_ARG(str, response)
             )
 
-        QThreadPool.globalInstance().start(RunnableFunc(run))
+        # Soumet la tâche au gestionnaire de ressources
+        if not self.resource_manager.submit(run):
+            self.clear_waiting_message()
+            self.scroll_layout.addWidget(StyledLabel("<span style='color:red'>[!] Trop de charge système, réessayez plus tard.</span>"))
+            print("[INFO] Requête refusée: surcharge CPU ou RAM")
+
 
     @pyqtSlot(str)
     def display_model_response(self, response):
@@ -387,5 +399,11 @@ class MainWindow(QWidget):
         else:
             print(f"[INFO] Ressources OK — CPU: {cpu:.1f}%, RAM: {ram:.1f}%")
 
+    def handle_resource_overload(self, message):
+        self.handle_resource_alert(True, 0, 0)
+        self.scroll_layout.addWidget(StyledLabel(f"<span style='color: orange; font-weight:bold;'>[ALERTE]</span> {message}"))
+        print("[ALERTE] " + message)
 
-
+    def handle_resource_ready(self):
+        self.handle_resource_alert(False, 0, 0)
+        # Ici tu peux gérer la levée d’alerte si besoin (nettoyer UI par ex)

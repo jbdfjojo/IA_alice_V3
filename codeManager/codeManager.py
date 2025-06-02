@@ -12,6 +12,7 @@ import speech_recognition as sr
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name
 from pygments.formatters import HtmlFormatter
+from gestionnaire_ressources.resource_manager import IAResourceManager
 
 # --- PyQt5 ---
 from PyQt5.QtCore import (
@@ -43,6 +44,12 @@ class codeManager(QObject):
         super().__init__()  # Obligatoire
         self.parent = parent
         self.agent = agent
+        
+        # Initialisation du gestionnaire de ressources IA
+        self.resource_manager = IAResourceManager(self.agent, max_threads=3, max_memory_gb=24)
+        self.resource_manager.overload_signal.connect(self.parent.handle_resource_overload)
+        self.resource_manager.ready_signal.connect(self.parent.handle_resource_ready)
+
 
     def generate_code_from_text(self, text):
         self.parent.set_waiting_message("Alice réfléchit...")
@@ -56,6 +63,10 @@ class codeManager(QObject):
             StyledLabel("<b style='color: lightgreen'>[Alice]</b> Je génère un code... ⌨️")
         )
         QApplication.processEvents()
+
+        if not self.resource_manager.ressources_disponibles():
+            print("[INFO] Requête refusée: surcharge CPU ou RAM")
+            return "Les ressources système sont surchargées. Veuillez réessayer plus tard."
 
         def run():
             print("[DEBUG] → Début du thread de génération de code")

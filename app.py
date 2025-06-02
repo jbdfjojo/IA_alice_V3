@@ -4,12 +4,11 @@ import json
 from main_window import MainWindow
 from llama_cpp_agent import LlamaCppAgent
 from PyQt5.QtWidgets import QApplication
-
-# Import du gestionnaire d'erreur
 from erreurManager.error_handler import ErrorHandler
+from gestionnaire_ressources.resource_manager import IAResourceManager
 
 def main():
-    error_handler = ErrorHandler()  # Pas de parent widget ici
+    error_handler = ErrorHandler()
 
     try:
         model_paths = {
@@ -29,16 +28,16 @@ def main():
 
         agent = LlamaCppAgent(model_paths=model_paths, selected_model=last_model)
 
+        resource_manager = IAResourceManager(agent, max_threads=3, max_memory_gb=6)  # Ajuste selon ta machine
+
         app = QApplication(sys.argv)
         window = MainWindow(model_paths, agent)
         window.show()
         sys.exit(app.exec_())
 
     except Exception as e:
-        # Log l'erreur et affiche un message console (pas encore d'interface dispo ici)
         error_handler.handle_error(e, context="Erreur dans main.py", user_message="Erreur critique au démarrage")
-        sys.exit(1)  # Quitte l'appli proprement
-
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
