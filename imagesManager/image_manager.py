@@ -223,6 +223,7 @@ class Image_Manager(QWidget):
                 img_label.setPixmap(pixmap.scaledToWidth(350, Qt.SmoothTransformation))
                 img_label.setStyleSheet("margin-top: 10px; margin-bottom: 10px;")
                 self.parent.scroll_layout.addWidget(img_label)
+                self.parent.save_button.setEnabled(True)
             else:
                 self.parent.scroll_layout.addWidget(QLabel("<b>[Alice]</b> L'image est invalide ou corrompue."))
         else:

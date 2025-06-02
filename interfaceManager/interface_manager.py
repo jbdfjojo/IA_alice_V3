@@ -92,6 +92,7 @@ class InterfaceManager:
 
         self.parent.save_button = QPushButton("Sauvegarder")
         self.parent.save_button.clicked.connect(self.parent.save_prompt)
+        self.parent.save_button.setEnabled(False)
         top_controls.addWidget(self.parent.save_button)
 
         layout.addLayout(top_controls)

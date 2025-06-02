@@ -137,13 +137,19 @@ class codeManager(QObject):
         """)
 
         container_layout.addWidget(copy_btn, alignment=Qt.AlignRight)
+        self.parent.save_button.setEnabled(True)
 
         self.parent.scroll_layout.addWidget(container)
         QTimer.singleShot(100, lambda: self.parent.scroll_area.verticalScrollBar().setValue(
             self.parent.scroll_area.verticalScrollBar().maximum()))
 
 
+        # ✅ Mémorisation pour bouton "Sauvegarder"
+        self.parent.last_response = raw_code
+        self.parent.last_prompt = self.parent.input_box.toPlainText().strip() or "Code généré"
+
         if self.parent.voice_checkbox.isChecked():
             self.parent.images.speak("Voici le code généré.")
         self.parent.voice_recognition_thread.resume()
+
 

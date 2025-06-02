@@ -158,6 +158,8 @@ class MainWindow(QWidget):
         self.resize(800, 500)  # 🖥️ Taille de départ de la fenêtre
 
         self.interface = InterfaceManager(self)
+        self.last_response = ""  # 🔐 Pour initialiser
+        self.last_prompt = ""  # 🧠 Pour #save
 
     def toggle_voice(self, state):
         self.config["voice_enabled"] = bool(state)
@@ -207,6 +209,8 @@ class MainWindow(QWidget):
         self.set_waiting_message("Alice réfléchit...")
         print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
 
+        self.last_prompt = prompt  # 🧠 Mémorise le prompt pour #save
+
         def run():
             response = self.images.generate(prompt)
             print("[DEBUG] Réponse brute :", response)
@@ -226,6 +230,10 @@ class MainWindow(QWidget):
         self.clear_waiting_message()
         self.spinner_movie.stop()
         self.spinner_label.setVisible(False)
+        self.save_button.setEnabled(True)
+
+        # 🔐 Sauvegarder les derniers prompt/réponse
+        self.last_response = response.strip()
 
         label = StyledLabel(f"<b style='color: lightgreen'>[Alice]</b> <span style='color: white;'>{escape(response)}</span>")
         self.scroll_layout.addWidget(label)
@@ -235,8 +243,14 @@ class MainWindow(QWidget):
         if self.voice_checkbox.isChecked():
             self.images.speak(response)
 
+        # ✅ Sauvegarde automatique si #save dans le prompt
+        if "#save" in self.last_prompt.lower():
+            print("🔄 Détection de #save dans le prompt -> lancement sauvegarde")
+            self.save_prompt()
+
         self.is_user_speaking = True
         self.voice_recognition_thread.resume()
+
 
 
 
@@ -245,11 +259,21 @@ class MainWindow(QWidget):
         if not text:
             return
 
+        # Si l'utilisateur tape #save → déclencher la sauvegarde
+        if "#save" in text:
+            self.save_prompt()
+            self.input_box.clear()
+            return
+
+        # Sauvegarde du prompt actuel pour usage ultérieur
+        self.last_prompt = text
+
+        # Affichage du message utilisateur dans l'UI
         user_label = StyledLabel(f"<b style='color: lightblue'>[Vous]</b> {escape(text)}")
         self.scroll_layout.addWidget(user_label)
         QTimer.singleShot(100, lambda: self.scroll_area.verticalScrollBar().setValue(
             self.scroll_area.verticalScrollBar().maximum()))
-
+        self.last_prompt = text  # 🧠 Stocke le prompt avant de vider
         self.input_box.clear()
 
         text_lower = text.lower()
@@ -257,28 +281,33 @@ class MainWindow(QWidget):
             self.image_manager.generate_image_from_text(text)
         elif any(kw in text_lower for kw in ["code", "fonction", "script", "programme", "algo", "python", "afficher", "fonctionne"]):
             self.codeManager.generate_code_from_text(text)
-
         else:
             self.generate_model_response(text)
 
 
     def save_prompt(self):
-        prompt = self.input_box.toPlainText().strip()
-        if prompt:
-            response_label = None
-            for i in reversed(range(self.scroll_layout.count())):
-                widget = self.scroll_layout.itemAt(i).widget()
-                if isinstance(widget, StyledLabel) and "[Alice]" in widget.text():
-                    response_label = widget
-                    break
+        prompt = self.last_prompt.strip()
+        response = self.last_response.strip()
 
-            response = response_label.text() if response_label else ""
-            from memoireManager.memory_window import MemoryViewer
-            mem = MemoryViewer(self.images)  # Connexion temporaire
-            mem.save_to_database(prompt, response)
-            mem.close()
+        # 🔍 Si vide, on tente de lire depuis l'UI
+        if not prompt:
+            prompt = self.input_box.toPlainText().strip()
 
-            self.scroll_layout.addWidget(StyledLabel("<span style='color: lightgreen'>[✔] Interaction sauvegardée.</span>"))
+        print("📝 [Sauvegarde demandée]")
+        print("Prompt :", prompt)
+        print("Réponse :", response)
+
+        if not prompt or not response:
+            self.scroll_layout.addWidget(StyledLabel("<span style='color:red'>[!] Aucune réponse à sauvegarder.</span>"))
+            return
+
+        from memoireManager.memory_window import MemoryViewer
+        mem = MemoryViewer(memory_data=None)
+        mem.save_to_database(prompt, response)
+        mem.close()
+
+        self.scroll_layout.addWidget(StyledLabel("<span style='color: lightgreen'>[✔] Interaction sauvegardée.</span>"))
+
 
 
     def open_memory_window(self):
@@ -314,6 +343,16 @@ class MainWindow(QWidget):
         container = QWidget()
         container_layout = QVBoxLayout(container)
 
+        # 🔧 Nettoyage du code brut pour éviter les ```python
+        clean_code = raw_code.strip()
+        if clean_code.startswith("```"):
+            # Supprime les balises markdown
+            clean_code = re.sub(r"^```[a-zA-Z]*\n?", "", clean_code)
+            clean_code = re.sub(r"```$", "", clean_code).strip()
+
+        self.last_response = clean_code  # ✅ Code propre à sauvegarder
+        self.last_prompt = self.input_box.toPlainText().strip() or "Code généré"
+
         code_display = QTextEdit()
         code_display.setReadOnly(True)
         code_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -327,11 +366,12 @@ class MainWindow(QWidget):
 
         copy_btn = QPushButton("📋 Copier le code")
         copy_btn.setFixedWidth(150)
-        copy_btn.clicked.connect(lambda: pyperclip.copy(raw_code))
+        copy_btn.clicked.connect(lambda: pyperclip.copy(clean_code))
         copy_btn.setStyleSheet("margin-top: 5px; margin-bottom: 10px;")
         container_layout.addWidget(copy_btn, alignment=Qt.AlignCenter)
 
         self.scroll_layout.addWidget(container)
+
 
 
     def afficher_erreur(self, message):
