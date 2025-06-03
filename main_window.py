@@ -176,10 +176,23 @@ class MainWindow(QWidget):
         self.image_manager = Image_Manager(parent=self, agent=self.llama_agent)
 
         # Initialisation du gestionnaire de ressources IA
-        self.resource_manager = IAResourceManager(self.llama_agent, max_threads=3, max_memory_gb=15)
+        self.resource_manager = IAResourceManager(
+            agent=self.llama_agent,
+            max_threads=3,
+            max_memory_gb=None,
+            max_memory_ratio=0.35
+        )
+        self.resource_manager.update_config(
+            max_threads=6,
+            max_memory_gb=14.0,
+            max_memory_ratio=0.35,
+            agent=self.llama_agent
+        )
         self.resource_manager.overload_signal.connect(self.handle_resource_overload)
         self.resource_manager.ready_signal.connect(self.handle_resource_ready)
 
+        # Ajout : ajustement dynamique du seuil mémoire à 60% RAM dispo
+        self.adjust_memory_threshold()
 
         self.resize(800, 500)  # 🖥️ Taille de départ de la fenêtre
 
@@ -251,6 +264,7 @@ class MainWindow(QWidget):
         print("[DEBUG] >>> Appel de generate_model_response() avec :", prompt)
 
         self.last_prompt = prompt  # 🧠 Mémorise le prompt pour #save
+        self.try_run_ia(prompt)
 
         def run():
             response = self.images.generate(prompt)
@@ -446,3 +460,35 @@ class MainWindow(QWidget):
     def handle_resource_ready(self):
         self.handle_resource_alert(False, 0, 0)
         # Ici tu peux gérer la levée d’alerte si besoin (nettoyer UI par ex)
+
+    def adjust_memory_threshold(self):
+        ram_available_gb = psutil.virtual_memory().available / (1024 ** 3)
+        new_threshold = ram_available_gb * 0.6
+        self.resource_manager.update_config(max_memory_gb=new_threshold)
+        print(f"[CONFIG] Seuil mémoire ajusté dynamiquement à {new_threshold:.2f} GB")
+
+    def show_alert(self, message):
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setWindowTitle("Alerte Ressources IA")
+        msg_box.setText(message)
+        msg_box.exec_()
+
+    def try_run_ia(self, prompt):
+        if self.resource_manager.can_run():
+            def run():
+                response = self.images.generate(prompt)
+                print("[DEBUG] Réponse brute :", response)
+                QMetaObject.invokeMethod(
+                    self,
+                    "display_model_response",
+                    Qt.QueuedConnection,
+                    Q_ARG(str, response)
+                )
+            if not self.resource_manager.submit(run):
+                self.show_alert("Requête refusée : surcharge CPU ou RAM. Réessayez plus tard.")
+                print("[INFO] Requête refusée: surcharge CPU ou RAM")
+            else:
+                self.set_waiting_message("Alice réfléchit...")
+        else:
+            self.show_alert("Ressources insuffisantes pour lancer la requête IA.")

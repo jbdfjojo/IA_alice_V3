@@ -28,8 +28,6 @@ def main():
 
         agent = LlamaCppAgent(model_paths=model_paths, selected_model=last_model)
 
-        resource_manager = IAResourceManager(agent, max_threads=3, max_memory_gb=6)  # Ajuste selon ta machine
-
         app = QApplication(sys.argv)
         window = MainWindow(model_paths, agent)
         window.show()

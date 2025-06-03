@@ -27,12 +27,18 @@ class LlamaCppAgent:
         try:
             self.model = Llama(
                 model_path=self.model_path,
-                n_ctx=1024,
-                n_threads=6,
-                n_gpu_layers=0,
+                n_ctx=2048,            # Contexte plus large si utile (selon ta RAM)
+                n_batch=512,           # Meilleure vitesse (valeurs entre 256 et 1024 selon la RAM)
+                n_threads=6,           # Autant que ton nombre de cœurs CPU
+                n_gpu_layers=0,        # Si tu veux tout sur CPU. Sinon adapte.
                 seed=42,
-                verbose=True
+                use_mmap=True,         # Chargement mémoire optimisé
+                use_mlock=True,        # Évite le swap (garde en RAM)
+                f16_kv=True,           # Active les clés/valeurs float16 (accélère le modèle)
+                logits_all=False,      # Utile si tu n'as pas besoin de tous les logits
+                verbose=False          # Optionnel : désactive les logs verbeux
             )
+
         except Exception as e:
             self.error_handler.handle_error(e, context="Chargement du modèle", user_message="Erreur lors du chargement du modèle")
             self.model = None

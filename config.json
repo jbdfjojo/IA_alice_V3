@@ -1,5 +1,5 @@
 {
-    "last_model": "Mistral-7B-Instruct",
+    "last_model": "Nous-Hermes-2-Mixtral",
     "models": {
         "Mistral-7B-Instruct": "modelManager/mistral-7b-instruct-v0.2.Q8_0.gguf",
         "Nous-Hermes": "modelManager/nous-hermes-llama2-13b.Q8_0.gguf"
